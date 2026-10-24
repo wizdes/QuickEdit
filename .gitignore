@@ -6,3 +6,5 @@ builds/*.zip
 builds/*.dmg
 *.xcuserstate
 xcuserdata/
+bench/fixtures/
+bench/bin/
