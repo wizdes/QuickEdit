@@ -17,14 +17,14 @@ Each row is one behavior QuickEdit must match or deliberately change. Status is 
 ## M2: document life
 | ID | Behavior | Ref | Status |
 | --- | --- | --- | --- |
-| P10 | Autosave in place; edits survive a quit with no prompt. | Document.m:831 | todo |
-| P11 | File > Duplicate (Shift+Cmd+S), Rename…, Move To…, Revert To > Last Saved / Browse All Versions. | codemap menu File | todo |
-| P12 | Save All. | menu File | todo |
-| P13 | Open Recent and Clear Menu. | menu File | todo |
-| P14 | Locked file: edits prompt "Unlock" or "Duplicate". | NSDocument | todo |
-| P15 | File changed by another app: reloads when clean, warns when dirty. | NSDocument | todo |
-| P16 | Windows, selection and scroll position restored after relaunch. | DocumentWindowController.m:619-637 | todo |
-| P17 | Opening a file from an empty untitled window replaces that window (transient document). | DocumentController.m:153-266 | todo |
+| P10 | Autosave in place; edits survive a quit with no prompt. | Document.m:831 | same (unit tested; UI test not run yet) |
+| P11 | File > Duplicate (Shift+Cmd+S), Rename…, Move To…, Revert To > Last Saved / Browse All Versions. | codemap menu File | same; Save As is the Option alternate of Duplicate (UI test not run yet) |
+| P12 | Save All. | menu File | same (kept, as in TextEdit 1.9) |
+| P13 | Open Recent and Clear Menu. | menu File | same (unit test proves AppKit fills it) |
+| P14 | Locked file: edits prompt "Unlock" or "Duplicate". | NSDocument | same, from NSDocument (UI test not run yet) |
+| P15 | File changed by another app: reloads when clean, warns when dirty. | NSDocument | same; QuickEdit reloads after about 3 s (macOS notice delay); M3 makes it compare content, not dates |
+| P16 | Windows, selection and scroll position restored after relaunch. | DocumentWindowController.m:619-637 | better: also restores the selection and first visible line (TextEdit 1.9 restores only the scroller style); fix for exact scroll place in M3 |
+| P17 | Opening a file from an empty untitled window replaces that window (transient document). | DocumentController.m:153-266 | same (unit tested; UI test not run yet) |
 | P18 | Export as PDF… | Edit.nib:315 | todo (built in M7) |
 
 ## M3: encodings and line endings
