@@ -12,7 +12,7 @@
 | Mac speed research (Astra) | `docs/research/speed-astra-2026-10-23.md` | 15 ranked changes, 22 dated sources. |
 | X posts, Sept 2025 to Oct 2026 | `docs/research/x-posts-2026-10-23.md` | 36 posts. TextKit 2 complaints from STTextView's author; dyld and AppKit floor of about 150 ms. |
 | YouTube search | none kept | Only WWDC21 "Meet TextKit 2" and a 2022 talk; both already covered by Astra's sources. |
-| Reddit | none | Antigravity needs a new login; see `docs/AWAY_LOG.md`. |
+| Reddit | `docs/research/reddit-search-2026-10-23.md` | After the user's re-login. Search summaries only (no thread opened, no author or score), so weak evidence. One usable tip, matching Doc B: keep `usesFontPanel = false`, because the font panel sync slows typing in big files (attributed to Christian Tietze). |
 
 ## Measured on this Mac (Mac14,3, 8 GiB, macOS 27.0.1)
 - System TextEdit launch to visible window: median 265.2 ms, min 216.6, max 270.3, n=7 (`bench/baseline/textedit-launch.csv`).
