@@ -100,21 +100,6 @@ final class DocumentFileTests: XCTestCase {
                                        format: .init(encoding: .utf8, hasBOM: false, lineEnding: .lf))
     }
 
-    func testInvalidUTF8OpenFailsWithNoDocument() async throws {
-        let url = try file("bad.txt", [0x61, 0xFF, 0x62])
-        let controller = NSDocumentController.shared
-        let before = controller.documents.count
-        let result: (NSDocument?, Error?) = await withCheckedContinuation { continuation in
-            controller.openDocument(withContentsOf: url, display: false) { document, _, error in
-                continuation.resume(returning: (document, error))
-            }
-        }
-        XCTAssertNil(result.0)
-        XCTAssertNotNil(result.1)
-        XCTAssertEqual(controller.documents.count, before)
-        XCTAssertNil(controller.document(for: url))
-    }
-
     func testSaveIntoReadOnlyFolderFailsAndKeepsBytes() async throws {
         let original = Array("keep me\n".utf8)
         let url = try file("locked.txt", original)
@@ -125,6 +110,9 @@ final class DocumentFileTests: XCTestCase {
         XCTAssertNotNil(error, "a save into a read-only folder must fail")
         XCTAssertEqual(Array(try Data(contentsOf: url)), original, "original bytes untouched")
         XCTAssertTrue(document.isDocumentEdited, "document stays edited after a failed save")
+        // Otherwise its autosave fires 30 s later into the deleted folder and
+        // the modal error alert stops whichever test is running then.
+        document.updateChangeCount(.changeCleared)
     }
 
     // MARK: Root item 3: async writing

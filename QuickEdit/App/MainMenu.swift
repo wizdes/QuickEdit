@@ -14,6 +14,7 @@ enum MainMenu {
         mainMenu.addItem(submenuItem(fileMenu()))
         mainMenu.addItem(submenuItem(editMenu()))
         mainMenu.addItem(submenuItem(formatMenu()))
+        mainMenu.addItem(submenuItem(viewMenu()))
         let window = windowMenu()
         mainMenu.addItem(submenuItem(window))
         NSApp.windowsMenu = window
@@ -151,6 +152,18 @@ enum MainMenu {
     private static func formatMenu() -> NSMenu {
         let menu = NSMenu(title: "Format")
         menu.addItem(item("Prevent Editing", #selector(TextDocument.toggleReadOnly(_:))))
+        // The title flips to "Wrap to Window" in TextDocument.validateMenuItem.
+        menu.addItem(item("Wrap to Page", #selector(TextDocument.togglePageBreaks(_:)), "w", [.command, .shift]))
+        return menu
+    }
+
+    /// Zoom, handled by the window's ScalingScrollView through the responder
+    /// chain. Keys as in Edit.nib: Shift+Cmd+. and Shift+Cmd+, (shown as Cmd+> and Cmd+<).
+    private static func viewMenu() -> NSMenu {
+        let menu = NSMenu(title: "View")
+        menu.addItem(item("Actual Size", #selector(ScalingScrollView.zoomToActualSize(_:)), "0"))
+        menu.addItem(item("Zoom In", #selector(ScalingScrollView.zoomIn(_:)), ".", [.command, .shift]))
+        menu.addItem(item("Zoom Out", #selector(ScalingScrollView.zoomOut(_:)), ",", [.command, .shift]))
         return menu
     }
 

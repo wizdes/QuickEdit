@@ -30,6 +30,22 @@ final class TextDocument: NSDocument {
     /// Format > Prevent Editing. Not saved in plain files.
     private(set) var preventsEditing = false
 
+    /// Format > Wrap to Page. New documents start from the `ShowPageBreaks`
+    /// default; files read from disk start in Wrap to Window, as plain files
+    /// do in TextEdit (Document.m:121, :253-258). Not saved in plain files.
+    /// Not an undoable change and not an edit (TextEdit 1.9, Document.m:721-727).
+    var hasMultiplePages = false {
+        didSet {
+            guard hasMultiplePages != oldValue else { return }
+            for controller in windowControllers {
+                (controller as? DocumentWindowController)?.setHasMultiplePages(hasMultiplePages)
+            }
+        }
+    }
+
+    /// Set once text has been read from a file, so the window starts in Wrap to Window.
+    private nonisolated let wasRead = Atomic<Bool>(false)
+
     /// The untitled window made at launch (or by a Dock click with no
     /// windows), not yet touched. Opening a file replaces it in place
     /// (reference/apple/Document.m:525-543, DocumentController.m:153-277).
@@ -95,6 +111,9 @@ final class TextDocument: NSDocument {
     }
 
     override func makeWindowControllers() {
+        if !wasRead.load(ordering: .relaxed) {
+            hasMultiplePages = Defaults.bool(.showPageBreaks)
+        }
         addWindowController(DocumentWindowController(document: self))
     }
 
@@ -173,6 +192,7 @@ final class TextDocument: NSDocument {
             $0.format = decoded.format
             $0.loadedLossily = decoded.lossy
         }
+        wasRead.store(true, ordering: .relaxed)
     }
 
     // MARK: Changes made by other apps
@@ -528,9 +548,19 @@ final class TextDocument: NSDocument {
         }
     }
 
+    // MARK: Wrap to Page
+
+    @objc func togglePageBreaks(_ sender: Any?) {
+        hasMultiplePages.toggle()
+    }
+
     override func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(toggleReadOnly(_:)) {
             menuItem.title = preventsEditing ? "Allow Editing" : "Prevent Editing"
+            return true
+        }
+        if menuItem.action == #selector(togglePageBreaks(_:)) {
+            menuItem.title = hasMultiplePages ? "Wrap to Window" : "Wrap to Page"
             return true
         }
         return super.validateMenuItem(menuItem)

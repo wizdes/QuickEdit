@@ -27,7 +27,7 @@ final class MainMenuTests: XCTestCase {
 
     func testMenuBar() throws {
         let bar = MainMenu.build()
-        XCTAssertEqual(bar.items.map(\.title), ["QuickEdit", "File", "Edit", "Format", "Window", "Help"])
+        XCTAssertEqual(bar.items.map(\.title), ["QuickEdit", "File", "Edit", "Format", "View", "Window", "Help"])
 
         let app = try menu("QuickEdit", in: bar)
         check(app, "About QuickEdit", "orderFrontStandardAboutPanel:")
@@ -277,9 +277,10 @@ final class MainMenuTests: XCTestCase {
         }
     }
 
-    /// Format keeps only Prevent Editing in M4 (Wrap to Page comes later).
+    /// Format keeps Prevent Editing and, since M5, Wrap to Page (Edit.nib order).
     func testFormatMenuTree() throws {
-        XCTAssertEqual(Self.rows(try menu("Format", in: MainMenu.build())), ["Prevent Editing||toggleReadOnly:"])
+        XCTAssertEqual(Self.rows(try menu("Format", in: MainMenu.build())),
+                       ["Prevent Editing||toggleReadOnly:", "Wrap to Page|Shift+Cmd+W|togglePageBreaks:"])
     }
 
     /// AppKit fills Open Recent in the app's real menu bar.

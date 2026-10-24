@@ -46,22 +46,67 @@ enum TextViewFactory {
                       height: rows * lineHeight(of: font))
     }
 
+    /// The one layout manager a window shares between its text views
+    /// (one in Wrap to Window, one per page in Wrap to Page).
     @MainActor
-    static func makeTextView(storage: NSTextStorage, size: NSSize) -> NSTextView {
+    static func makeLayoutManager() -> NSLayoutManager {
         let layoutManager = NSLayoutManager()
         layoutManager.allowsNonContiguousLayout = true
-        let container = NSTextContainer(size: NSSize(width: size.width, height: CGFloat.greatestFiniteMagnitude))
-        container.widthTracksTextView = true
+        return layoutManager
+    }
+
+    /// A text view for tests and for one-view use: its own layout manager on `storage`.
+    @MainActor
+    static func makeTextView(storage: NSTextStorage, size: NSSize) -> NSTextView {
+        let layoutManager = makeLayoutManager()
+        let (textView, container) = makeWindowModeTextView(size: size)
         layoutManager.addTextContainer(container)
         storage.addLayoutManager(layoutManager)
+        configureSharedState(textView)
+        configureTypingAttributes(textView)
+        return textView
+    }
 
+    /// Wrap to Window: a container as wide as the view and endlessly tall;
+    /// the view grows down and follows the window's width
+    /// (reference/apple/DocumentWindowController.m:566-589). The caller adds
+    /// the container to a layout manager, which then owns it: in TextKit 1 a
+    /// text view does not keep its container alive.
+    @MainActor
+    static func makeWindowModeTextView(size: NSSize) -> (NSTextView, NSTextContainer) {
+        let container = NSTextContainer(size: NSSize(width: size.width, height: CGFloat.greatestFiniteMagnitude))
+        container.widthTracksTextView = true
+        container.heightTracksTextView = false
         let textView = NSTextView(frame: NSRect(origin: .zero, size: size), textContainer: container)
         textView.minSize = NSSize(width: 0, height: size.height)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
+        return (textView, container)
+    }
 
+    /// Wrap to Page: a fixed-size view and container for one page
+    /// (DocumentWindowController.m:459-495). The caller adds the container
+    /// to the layout manager, which then owns it.
+    @MainActor
+    static func makePageTextView(frame: NSRect) -> (NSTextView, NSTextContainer) {
+        let container = NSTextContainer(size: frame.size)
+        container.widthTracksTextView = true
+        container.heightTracksTextView = true
+        let textView = NSTextView(frame: frame, textContainer: container)
+        textView.isHorizontallyResizable = false
+        textView.isVerticallyResizable = false
+        // Draw only inside the page's text area, so the frame line around it shows.
+        textView.clipsToBounds = true
+        return (textView, container)
+    }
+
+    /// Settings every text view on one layout manager shares (AppKit keeps
+    /// them once per layout manager), set on the first view
+    /// (DocumentWindowController.m:174-201).
+    @MainActor
+    static func configureSharedState(_ textView: NSTextView) {
         textView.isRichText = false
         textView.importsGraphics = false
         textView.usesFontPanel = false
@@ -70,10 +115,6 @@ enum TextViewFactory {
         textView.usesFindBar = true
         textView.isIncrementalSearchingEnabled = true
         textView.isAutomaticLinkDetectionEnabled = false
-
-        let attributes = plainTextAttributes()
-        textView.defaultParagraphStyle = attributes[.paragraphStyle] as? NSParagraphStyle
-        textView.typingAttributes = attributes
 
         // Spelling and substitutions from Defaults (reference/apple/DocumentWindowController.m:187-198).
         textView.isContinuousSpellCheckingEnabled = Defaults.bool(.checkSpellingWhileTyping)
@@ -84,6 +125,14 @@ enum TextViewFactory {
         textView.isAutomaticDashSubstitutionEnabled = Defaults.bool(.smartDashes)
         textView.isAutomaticDataDetectionEnabled = Defaults.bool(.dataDetectors)
         textView.isAutomaticTextReplacementEnabled = Defaults.bool(.textReplacement)
-        return textView
+    }
+
+    /// Plain font and tab stops for each new view
+    /// (DocumentWindowController.m:404-412).
+    @MainActor
+    static func configureTypingAttributes(_ textView: NSTextView) {
+        let attributes = plainTextAttributes()
+        textView.defaultParagraphStyle = attributes[.paragraphStyle] as? NSParagraphStyle
+        textView.typingAttributes = attributes
     }
 }

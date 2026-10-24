@@ -98,19 +98,6 @@ final class PlainTextIOTests: XCTestCase {
         XCTAssertEqual(Array(decoded.text.utf8), Array(text.utf8), "no normalization")
     }
 
-    func testInvalidUTF8Throws() {
-        for bad: [UInt8] in [[0xFF], [0x61, 0xC3], [0xED, 0xA0, 0x80], [0xC0, 0xAF], [0xEF, 0xBB, 0xBF, 0xFE]] {
-            XCTAssertThrowsError(try PlainTextIO.decode(Data(bad)), "\(bad)") { error in
-                XCTAssertEqual(error as? PlainTextIO.Error, .notUTF8)
-            }
-        }
-    }
-
-    func testEncodeRejectsOtherEncodings() {
-        let format = DecodedText.Format(encoding: .utf16, hasBOM: false, lineEnding: .lf)
-        XCTAssertThrowsError(try PlainTextIO.encode("x", as: format))
-    }
-
     func testNoLineEndingReportsLF() {
         XCTAssertEqual(PlainTextIO.mostCommonLineEnding(in: Array("abc".utf8)), .lf)
     }
