@@ -1,22 +1,15 @@
 # QuickEdit state
 
-Rewritten at each milestone, never appended. Last rewrite: 2026-10-23, stage 0.
+Rewritten at each milestone, never appended. Last rewrite: 2026-10-23, M1 built, M2 building.
 
-## Where things are
-- Plan: `docs/plan-page.html`, published at https://claude.ai/artifact/Qpy5RUjidhcEjs7dNpgoxP. The plan file is mirrored in `docs/plan.md`.
-- Old code (read only): `reference/apple` (Apple archive, project version 309) and `reference/zadr` (version 285, the 10.8 sample with ARC).
-- Speed bar: `bench/baseline/textedit-launch.csv`. System TextEdit window-visible median 265.2 ms, n=7, 2 warm-ups, 2026-10-23, Mac14,3, macOS 27.0.1.
-
-## Approvals from the user (2026-10-23)
-1. Plain text only. Rich text and the RTF, RTFD, HTML and Word formats are out.
-2. Swift on AppKit with NSTextView (TextKit 2). The old Objective-C is built once as a reference.
-3. Name QuickEdit, bundle ID dev.yili.QuickEdit.
-4. Do not block on the user. Astra and Fable vote on critical questions; the majority wins and root breaks a tie.
-5. The 10-milestone plan was approved in plan mode.
-
-## Stage 0 facts found so far
-- The Apple copy builds on Xcode 27.1 after two fixes: the six `English.lproj/*.strings` files ship as binary plists and must be turned into text, and the build needs `ARCHS=arm64 VALID_ARCHS=arm64` (the project lists only i386, x86_64 and old ARM, so without it the build "succeeds" with no binary). Its Info.plist hardcodes `com.apple.TextEdit`; rename it before launching. 107 warnings, 0 errors.
-- The built reference app launched and stayed running for 4 s. A System Events window query timed out (-1712); window checks must not use System Events.
-
-## Next action
-Write Doc B from `docs/codemap.md` and the research, then the M1 plan.
+Milestone: M2 (document life) plus M1 review fixes; one native Opus builder in flight in a scratch clone.
+Branch / worktree / commit: dev / worktrees/dev / 9b4bf95. main holds docs only so far.
+Unmerged work: M1 code is on dev (c385638), not merged to main, because its UI tests have not run.
+Checks run: `./build.sh unit` 26 passed of 26; `./build.sh` Release OK (ad-hoc); `reference/build-reference.sh` OK, 0 errors.
+Not run: 8 UI tests (Automation Mode off, needs the user's admin password; screen lock), launch bench for QuickEdit, screenshots, notarization (keychain locked).
+Builds: `builds/QuickEdit-M1-unit-tests-only.zip` (66,968 bytes, ad-hoc, not notarized; has the revert crash fixed in M2).
+Speed bar: TextEdit 265.2 ms median to window (n=7); 276.6 ms with the untitled-window argument.
+Approvals: see `docs/decisions.md` (plain text, Swift, QuickEdit, vote rule, 10-milestone plan; V1 TextKit 1).
+Open questions: see `docs/AWAY_LOG.md` (Automation Mode, keychain, Screen Recording, Antigravity login).
+Dead ends (do not retry): osascript System Events for window checks (times out); runner sandbox for Xcode builds.
+Next action: when the M2 builder reports, copy its owned files onto dev, run `./build.sh unit` and `xcodebuild build-for-testing`, then start the M2 reviews.
