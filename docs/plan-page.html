@@ -1,0 +1,158 @@
+<title>QuickEdit Build Plan</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one reading column, a milestone track drawn as a strip of numbered stations, then a table of done-tests. */
+:root{
+  --bg:#fbfbfa; --panel:#f1f2f4; --ink:#1d2129; --muted:#5c6370; --line:#d9dce2;
+  --accent:#2f62d8; --accent-soft:#e3ebfc; --done:#1f8a4c; --warn:#b26a00;
+  --sans:"Instrument Sans", -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --mono:"JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#15171c; --panel:#1e2129; --ink:#e7e9ee; --muted:#9aa1ad; --line:#2f333d;
+  --accent:#7ea3ff; --accent-soft:#22304f; --done:#56c98a; --warn:#f0a83a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#15171c; --panel:#1e2129; --ink:#e7e9ee; --muted:#9aa1ad; --line:#2f333d;
+  --accent:#7ea3ff; --accent-soft:#22304f; --done:#56c98a; --warn:#f0a83a; color-scheme:dark}
+body{background:var(--bg);color:var(--ink);font:16px/1.55 var(--sans)}
+.wrap{max-width:980px;margin:0 auto;padding-block:40px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:40px}
+h1{font-size:2.3rem;line-height:1.1;margin:0;font-weight:700;letter-spacing:-.02em;text-wrap:balance}
+h2{font-size:1.3rem;margin:0 0 12px;text-wrap:balance}
+p{margin:0;max-width:68ch}
+.eyebrow{font:600 .75rem/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.ask{background:var(--accent-soft);border-radius:10px;padding:18px 20px;display:grid;gap:8px}
+.ask strong{color:var(--accent)}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+.card{background:var(--panel);border-radius:10px;padding:16px 18px;display:grid;gap:6px;min-width:0}
+.big{font:600 2rem/1 var(--mono);font-variant-numeric:tabular-nums}
+.small{font-size:.88rem;color:var(--muted)}
+.track{overflow-x:auto;padding-bottom:6px}
+.track svg{min-width:860px;width:100%;height:auto;display:block}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+.tbl{overflow-x:auto}
+th,td{text-align:left;vertical-align:top;padding:10px 10px;border-bottom:1px solid var(--line)}
+th{font:600 .75rem var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+td.n{font:600 1rem var(--mono);color:var(--accent);white-space:nowrap}
+td.b{font-family:var(--mono);white-space:nowrap;font-variant-numeric:tabular-nums}
+ul{margin:0;padding-left:1.2em;display:grid;gap:4px}
+code{font-family:var(--mono);font-size:.88em;background:var(--panel);padding:1px 5px;border-radius:4px}
+.pill{display:inline-block;font:600 .72rem var(--mono);padding:2px 8px;border-radius:99px;background:var(--panel);color:var(--muted)}
+.pill.now{background:var(--accent-soft);color:var(--accent)}
+.pill.ok{color:var(--done)}
+</style>
+
+<div class="wrap">
+  <header style="display:grid;gap:10px">
+    <span class="eyebrow">Projects/QuickEdit · plan v1 · 2026-10-23</span>
+    <h1>QuickEdit: Apple's TextEdit sample, rebuilt as a fast plain-text editor for macOS 27</h1>
+  </header>
+
+  <section class="ask">
+    <span class="eyebrow">What I need from you</span>
+    <p><strong>Nothing is blocking.</strong> Read the plan when you have time. If a milestone or a "left out" item looks wrong, tell me in chat. I am already working on stage 0 and will keep going. A notarized build lands in <code>~/work/Projects/QuickEdit/builds/</code> after each milestone, and I send a notification when one is ready.</p>
+  </section>
+
+  <section>
+    <h2>Your decisions</h2>
+    <div class="grid2">
+      <div class="card"><span class="eyebrow">Format</span><p>Plain text only. No rich text, RTF, RTFD, HTML or Word files.</p></div>
+      <div class="card"><span class="eyebrow">Language</span><p>Swift on AppKit, using NSTextView (Apple's built-in text view). The old Objective-C is built once as a reference copy.</p></div>
+      <div class="card"><span class="eyebrow">Name</span><p>QuickEdit, bundle ID <code>dev.yili.QuickEdit</code>.</p></div>
+      <div class="card"><span class="eyebrow">Hard questions</span><p>Astra and Fable each vote. The most votes win, and I break ties. Every vote is logged in <code>docs/decisions.md</code>.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>The bar to beat</h2>
+    <div class="grid2">
+      <div class="card"><span class="eyebrow">TextEdit launch, today</span><span class="big">265.2 ms</span><span class="small">Click to visible window, median of 7 runs, 2 warm-ups dropped. Measured on this Mac (Mac14,3, macOS 27.0.1).</span></div>
+      <div class="card"><span class="eyebrow">QuickEdit target (M8)</span><span class="big">≤ 240 ms</span><span class="small">At least 25 ms faster than TextEdit, measured to the first moment you can type. Typing at 1.5 frames + 3 ms or less (p50). 100 MB file usable in under 1 s.</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>The 10 milestones</h2>
+    <p class="small" style="margin-bottom:14px">Each station ends with a working app and a build. Arrows show what each one needs first. M8 (speed) is the main tuning pass, but every milestone records launch and typing numbers.</p>
+    <div class="track">
+      <svg viewBox="0 0 900 230" role="img" aria-label="Milestone track from M1 to M10">
+        <defs><marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--muted)"/></marker></defs>
+        <g stroke="var(--muted)" stroke-width="1.4" fill="none" marker-end="url(#ah)">
+          <path d="M70,115 L118,60"/><path d="M70,115 L118,115"/><path d="M70,115 L118,170"/>
+          <path d="M202,60 L288,60"/><path d="M202,115 L288,115"/><path d="M202,170 L288,170"/>
+          <path d="M372,60 L458,105"/><path d="M372,115 L458,115"/><path d="M372,170 L458,125"/>
+          <path d="M542,115 L628,115"/><path d="M712,115 L798,115"/>
+        </g>
+        <g font-family="JetBrains Mono, monospace" font-size="12" text-anchor="middle">
+          <g><rect x="12" y="92" width="58" height="46" rx="8" fill="var(--accent)"/><text x="41" y="113" fill="var(--bg)" font-weight="600">M1</text><text x="41" y="128" fill="var(--bg)" font-size="10">skeleton</text></g>
+          <g><rect x="120" y="37" width="82" height="46" rx="8" fill="var(--accent-soft)"/><text x="161" y="58" fill="var(--accent)" font-weight="600">M2</text><text x="161" y="73" fill="var(--ink)" font-size="10">doc life</text></g>
+          <g><rect x="120" y="92" width="82" height="46" rx="8" fill="var(--accent-soft)"/><text x="161" y="113" fill="var(--accent)" font-weight="600">M3</text><text x="161" y="128" fill="var(--ink)" font-size="10">encodings</text></g>
+          <g><rect x="120" y="147" width="82" height="46" rx="8" fill="var(--accent-soft)"/><text x="161" y="168" fill="var(--accent)" font-weight="600">M4</text><text x="161" y="183" fill="var(--ink)" font-size="10">find, tools</text></g>
+          <g><rect x="290" y="37" width="82" height="46" rx="8" fill="var(--accent-soft)"/><text x="331" y="58" fill="var(--accent)" font-weight="600">M5</text><text x="331" y="73" fill="var(--ink)" font-size="10">layout</text></g>
+          <g><rect x="290" y="92" width="82" height="46" rx="8" fill="var(--accent-soft)"/><text x="331" y="113" fill="var(--accent)" font-weight="600">M6</text><text x="331" y="128" fill="var(--ink)" font-size="10">settings</text></g>
+          <g><rect x="290" y="147" width="82" height="46" rx="8" fill="var(--accent-soft)"/><text x="331" y="168" fill="var(--accent)" font-weight="600">M7</text><text x="331" y="183" fill="var(--ink)" font-size="10">print, PDF</text></g>
+          <g><rect x="460" y="92" width="82" height="46" rx="8" fill="var(--warn)"/><text x="501" y="113" fill="var(--bg)" font-weight="600">M8</text><text x="501" y="128" fill="var(--bg)" font-size="10">speed</text></g>
+          <g><rect x="630" y="92" width="82" height="46" rx="8" fill="var(--accent-soft)"/><text x="671" y="113" fill="var(--accent)" font-weight="600">M9</text><text x="671" y="128" fill="var(--ink)" font-size="10">system</text></g>
+          <g><rect x="800" y="92" width="88" height="46" rx="8" fill="var(--done)"/><text x="844" y="113" fill="var(--bg)" font-weight="600">M10</text><text x="844" y="128" fill="var(--bg)" font-size="10">finish</text></g>
+        </g>
+        <text x="12" y="222" font-family="JetBrains Mono, monospace" font-size="11" fill="var(--muted)">M2 to M4 and M5 to M7 can be planned side by side, but they are built one after another because they share files.</text>
+      </svg>
+    </div>
+  </section>
+
+  <section>
+    <h2>What each milestone adds, and how I prove it</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>#</th><th>Adds</th><th>Done-test</th><th>Budget</th></tr></thead>
+      <tbody>
+        <tr><td class="n">M1</td><td>The old code built on macOS 27 for reference. A new Swift app that opens, edits and saves UTF-8 <code>.txt</code>. Tests, speed scripts and a one-command build.</td><td>One command builds, tests and makes a notarized zip. A UI test types into a file, saves it, and the bytes on disk match.</td><td class="b">5 h</td></tr>
+        <tr><td class="n">M2</td><td>Autosave, Versions (browse and revert), Duplicate, Rename, Move To, locked files, files changed by another app, Open Recent, windows restored after relaunch.</td><td>A script makes the same edits in TextEdit and QuickEdit. Both leave the same files and versions.</td><td class="b">4 h</td></tr>
+        <tr><td class="n">M3</td><td>Text encodings and line endings: the encoding menu in Open and Save, the guess on open, byte-order marks, the "can't save in this encoding" alert, and CR, LF and CRLF kept as found.</td><td>About 30 files in different encodings come back byte-for-byte equal after open and save. The guesses match TextEdit's.</td><td class="b">4 h</td></tr>
+        <tr><td class="n">M4</td><td>Find and replace, Go to Line, spelling and grammar, Substitutions, Transformations, completion and Speech.</td><td>UI tests cover find, replace all, match case, wrap-around and go to line. The menus match TextEdit's item by item.</td><td class="b">3 h</td></tr>
+        <tr><td class="n">M5</td><td>Wrap to Window and Wrap to Page, zoom, full screen, window tabs, dark mode and the plain-text font.</td><td>Screenshots of both wrap modes at 3 zoom levels, next to TextEdit's. I read each one.</td><td class="b">4 h</td></tr>
+        <tr><td class="n">M6</td><td>The Settings window: new window size, font, default encodings, "add .txt", spelling defaults, autosave.</td><td>A UI test changes each setting. It survives relaunch and changes the next new window, the same way TextEdit does.</td><td class="b">3 h</td></tr>
+        <tr><td class="n">M7</td><td>Print with header, footer and wrap choices, Page Setup, and Export as PDF.</td><td>PDFs for 3 test files have the right page count and text, checked against TextEdit's PDFs.</td><td class="b">3 h</td></tr>
+        <tr><td class="n">M8</td><td>The speed pass: less launch work, lazy menus and panels, large-file settings, open in the background, memory and energy checks.</td><td>Launch at least 25 ms under TextEdit. Typing p50 ≤ 1.5 frames + 3 ms. 100 MB usable in under 1 s. 1 GB opens with no spinning wheel. All medians of 5.</td><td class="b">6 h</td></tr>
+        <tr><td class="n">M9</td><td>AppleScript, Services, drag and drop, Share menu, Writing Tools, VoiceOver and keyboard use, Quick Look.</td><td>An AppleScript test opens, edits and saves a file. The Accessibility Inspector audit shows no errors.</td><td class="b">3 h</td></tr>
+        <tr><td class="n">M10</td><td>App icon (I pick from 3 drafts and you can swap it), About box, README, DMG, the full check against TextEdit, final review.</td><td>Every behavior row is "same", "better" or "left out on purpose". All tests pass. A notarized DMG is in <code>builds/</code>.</td><td class="b">3 h</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section class="grid2">
+    <div class="card">
+      <span class="eyebrow">Every milestone, in order</span>
+      <ul>
+        <li>I write the milestone plan, and a reviewer checks it.</li>
+        <li>A builder agent writes the code in its own copy of the repo.</li>
+        <li>I run unit, file and UI tests, the TextEdit side-by-side script and the speed scripts, and I read the screenshots.</li>
+        <li>Astra and a fresh Opus reviewer check the code. A stronger builder fixes what they find.</li>
+        <li>I notarize, commit, push, and notify you with the build and a short try-it script.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <span class="eyebrow">Left out of this version</span>
+      <ul>
+        <li>Rich text, RTF, RTFD, HTML, Word, pictures, font panel, ruler, lists</li>
+        <li>Languages other than English</li>
+        <li>Auto-update and the App Store</li>
+        <li>A custom GPU text view (that is Fastpad's job)</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="card">
+    <span class="eyebrow">Risks</span>
+    <ul>
+      <li>UI tests and speed timing need this Mac's screen unlocked. When it is locked, I log those checks as not run and keep building the rest.</li>
+      <li>TextKit 2, the newer text layout engine, is slow on very long single lines. M8 may switch big files to the older engine. Astra and Fable vote on that choice.</li>
+      <li>The side-by-side script drives the real TextEdit, using scratch files only.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Status</h2>
+    <p><span class="pill now">stage 0</span> Research running: a map of the old code, and Mac speed research. TextEdit's launch time is measured. <span class="pill">M1–M10</span> not started.</p>
+  </section>
+</div>
