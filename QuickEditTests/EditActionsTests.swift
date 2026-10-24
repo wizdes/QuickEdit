@@ -232,6 +232,195 @@ final class EditActionsTests: XCTestCase {
         XCTAssertEqual(textView.string, "")
     }
 
+    // MARK: Sent with no target, results checked (M4 review row 2)
+
+    /// Sends the item's action with no target, as a menu choice does.
+    /// When `window` is the key window, this is `NSApp.sendAction(_:to:nil from:)`.
+    /// A unit-test host cannot become the active app while the screen is
+    /// locked, so it has no key window; then the action goes up the window's
+    /// responder chain from its first responder, which is the part of
+    /// AppKit's nil-target search that reaches a text view or its window.
+    /// The UI tests in FindAndLineTests cover the real key-window path.
+    private func sendWithNoTarget(_ item: NSMenuItem, in window: NSWindow,
+                                  file: StaticString = #filePath, line: UInt = #line) {
+        guard let action = item.action else { return XCTFail("\(item.title) has no action", file: file, line: line) }
+        window.makeKeyAndOrderFront(nil)
+        if NSApp.keyWindow === window {
+            XCTAssertTrue(NSApp.sendAction(action, to: nil, from: item), "\(item.title) was not handled",
+                          file: file, line: line)
+            return
+        }
+        var responder: NSResponder? = window.firstResponder
+        while let current = responder, !current.responds(to: action) {
+            responder = current.nextResponder
+        }
+        guard let target = responder else {
+            return XCTFail("nothing in the responder chain does \(item.title)", file: file, line: line)
+        }
+        if let validator = target as? NSMenuItemValidation {
+            XCTAssertTrue(validator.validateMenuItem(item), "\(item.title) is disabled", file: file, line: line)
+        }
+        XCTAssertTrue(target.tryToPerform(action, with: item), "\(item.title) was not handled", file: file, line: line)
+    }
+
+    /// A text view in a scroll view, first responder in an offscreen window.
+    private func makeScrollingTextView(_ text: String) -> NSTextView {
+        let storage = NSTextStorage(string: text, attributes: TextViewFactory.plainTextAttributes())
+        storages.append(storage)
+        let size = NSSize(width: 400, height: 200)
+        let textView = TextViewFactory.makeTextView(storage: storage, size: size)
+        let scrollView = NSScrollView(frame: NSRect(origin: .zero, size: size))
+        scrollView.hasVerticalScroller = true
+        scrollView.documentView = textView
+        let window = NSWindow(contentRect: scrollView.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = scrollView
+        window.makeFirstResponder(textView)
+        windows.append(window)
+        return textView
+    }
+
+    /// Copies of every item on the general pasteboard, put back after a test that uses it.
+    private func savePasteboard() -> [[NSPasteboard.PasteboardType: Data]] {
+        (NSPasteboard.general.pasteboardItems ?? []).map { item in
+            Dictionary(uniqueKeysWithValues: item.types.compactMap { type in item.data(forType: type).map { (type, $0) } })
+        }
+    }
+
+    private func restorePasteboard(_ saved: [[NSPasteboard.PasteboardType: Data]]) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        let items = saved.map { contents in
+            let item = NSPasteboardItem()
+            for (type, data) in contents { item.setData(data, forType: type) }
+            return item
+        }
+        if !items.isEmpty { pasteboard.writeObjects(items) }
+    }
+
+    func testCutCopyPasteDeleteUndoRedoChangeTextPasteboardAndUndoState() throws {
+        let saved = savePasteboard()
+        defer { restorePasteboard(saved) }
+        let textView = makeTextView("alpha beta gamma")
+        let window = try XCTUnwrap(textView.window)
+        let undoManager = try XCTUnwrap(textView.undoManager)
+        undoManager.removeAllActions()
+        // One undo group per edit, as one menu event makes in the app. Undo
+        // and Redo run outside any group, as they do from the menu.
+        undoManager.groupsByEvent = false
+        defer { undoManager.groupsByEvent = true }
+        func choose(_ path: String...) throws {
+            let edits = ["Cut", "Paste", "Delete"].contains(path.last!)
+            if edits { undoManager.beginUndoGrouping() }
+            sendWithNoTarget(try item(path), in: window)
+            if edits { undoManager.endUndoGrouping() }
+        }
+        let pasteboard = NSPasteboard.general
+
+        textView.setSelectedRange(NSRange(location: 6, length: 5))
+        try choose("Edit", "Copy")
+        XCTAssertEqual(pasteboard.string(forType: .string), "beta ")
+        XCTAssertEqual(textView.string, "alpha beta gamma", "Copy changed the text")
+        XCTAssertFalse(undoManager.canUndo, "Copy made an undo step")
+
+        textView.setSelectedRange(NSRange(location: 0, length: 6))
+        try choose("Edit", "Cut")
+        XCTAssertEqual(textView.string, "beta gamma")
+        XCTAssertEqual(pasteboard.string(forType: .string), "alpha ")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 0, length: 0))
+        XCTAssertTrue(undoManager.canUndo)
+
+        textView.setSelectedRange(NSRange(location: 10, length: 0))
+        try choose("Edit", "Paste")
+        XCTAssertEqual(textView.string, "beta gammaalpha ")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 16, length: 0))
+
+        try choose("Edit", "Undo")
+        XCTAssertEqual(textView.string, "beta gamma", "Undo did not take back Paste")
+        XCTAssertTrue(undoManager.canRedo)
+        try choose("Edit", "Undo")
+        XCTAssertEqual(textView.string, "alpha beta gamma", "Undo did not take back Cut")
+        XCTAssertFalse(undoManager.canUndo)
+        try choose("Edit", "Redo")
+        XCTAssertEqual(textView.string, "beta gamma", "Redo did not do Cut again")
+        XCTAssertTrue(undoManager.canRedo, "the Paste step was lost")
+        try choose("Edit", "Redo")
+        XCTAssertEqual(textView.string, "beta gammaalpha ")
+        XCTAssertFalse(undoManager.canRedo)
+
+        textView.setSelectedRange(NSRange(location: 0, length: 5))
+        try choose("Edit", "Delete")
+        XCTAssertEqual(textView.string, "gammaalpha ")
+        XCTAssertEqual(pasteboard.string(forType: .string), "alpha ", "Delete wrote to the pasteboard")
+
+        try choose("Edit", "Select All")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 0, length: 11))
+    }
+
+    func testJumpToSelectionScrollsTheSelectionIntoView() throws {
+        let text = (1...300).map { "line \($0)" }.joined(separator: "\n")
+        let textView = makeScrollingTextView(text)
+        let window = try XCTUnwrap(textView.window)
+        let layoutManager = try XCTUnwrap(textView.layoutManager)
+        let container = try XCTUnwrap(textView.textContainer)
+        let target = (text as NSString).range(of: "line 280")
+        textView.setSelectedRange(target)
+        layoutManager.ensureLayout(for: container)
+        textView.scroll(.zero)
+        let glyphs = layoutManager.glyphRange(forCharacterRange: target, actualCharacterRange: nil)
+        var rect = layoutManager.boundingRect(forGlyphRange: glyphs, in: container)
+        rect.origin.x += textView.textContainerOrigin.x
+        rect.origin.y += textView.textContainerOrigin.y
+        XCTAssertFalse(textView.visibleRect.intersects(rect), "the selection was already in view")
+
+        sendWithNoTarget(try item("Edit", "Find", "Jump to Selection"), in: window)
+        XCTAssertTrue(textView.visibleRect.contains(rect), "Jump to Selection did not show the selection")
+        XCTAssertEqual(textView.selectedRange(), target)
+    }
+
+    func testCheckDocumentNowSelectsTheFirstMisspelling() throws {
+        let textView = makeTextView("the wrod is here")
+        let window = try XCTUnwrap(textView.window)
+        textView.setSelectedRange(NSRange(location: 0, length: 0))
+        sendWithNoTarget(try item("Edit", "Spelling and Grammar", "Check Document Now"), in: window)
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 4, length: 4), "the misspelled word was not selected")
+        XCTAssertEqual(textView.string, "the wrod is here")
+    }
+
+    func testShowPanelsOpenTheSpellingAndSubstitutionsPanels() throws {
+        let textView = makeTextView("text")
+        let window = try XCTUnwrap(textView.window)
+        let checker = NSSpellChecker.shared
+        let panels: [(path: [String], panel: NSPanel)] = [
+            (["Edit", "Spelling and Grammar", "Show Spelling and Grammar"], checker.spellingPanel),
+            (["Edit", "Substitutions", "Show Substitutions"], checker.substitutionsPanel),
+        ]
+        for (path, panel) in panels {
+            panel.orderOut(nil)
+            XCTAssertFalse(panel.isVisible)
+            sendWithNoTarget(try item(path), in: window)
+            XCTAssertTrue(panel.isVisible, "\(path.last!) did not show its panel")
+            panel.orderOut(nil)
+        }
+    }
+
+    /// Speaks aloud for a moment, then stops. The text view's speech state
+    /// is read from its Stop Speaking item, which it enables only while it
+    /// speaks. (NSSpeechSynthesizer.isAnyApplicationSpeaking stays false for
+    /// a text view's speech on macOS 27, so it cannot be used.)
+    func testStartAndStopSpeakingDriveTheSpeechSynthesizer() throws {
+        let textView = makeTextView(String(repeating: "Quick edit speaks this sentence. ", count: 4))
+        let window = try XCTUnwrap(textView.window)
+        textView.selectAll(nil)
+        let stop = try item("Edit", "Speech", "Stop Speaking")
+        func speaking() -> Bool { textView.validateMenuItem(stop) }
+        XCTAssertFalse(speaking(), "the text view was already speaking")
+        sendWithNoTarget(try item("Edit", "Speech", "Start Speaking"), in: window)
+        XCTAssertTrue(speaking(), "Start Speaking did not start speech")
+        sendWithNoTarget(stop, in: window)
+        XCTAssertFalse(speaking(), "Stop Speaking did not stop speech")
+    }
+
     // MARK: Prevent Editing
 
     func testPreventEditingMakesTheViewReadOnlyAndBack() throws {

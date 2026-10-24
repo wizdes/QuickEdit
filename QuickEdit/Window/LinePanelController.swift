@@ -26,6 +26,10 @@ final class LinePanelController: NSWindowController, NSWindowRestoration {
 
     private(set) var lineField: NSTextField?
 
+    /// The window Select Line acts on. AppKit's main window; tests replace it,
+    /// because a unit-test host has no main window while the screen is locked.
+    var mainWindow: @MainActor () -> NSWindow? = { NSApp.mainWindow }
+
     init() {
         super.init(window: nil)
     }
@@ -78,6 +82,11 @@ final class LinePanelController: NSWindowController, NSWindowRestoration {
         panel.identifier = Self.panelIdentifier
         panel.restorationClass = LinePanelController.self
         panel.isRestorable = true
+        // A saved frame puts the panel back where it was; otherwise it opens
+        // centered, not at the content rect's (0,0).
+        if !panel.setFrameUsingName(Self.frameAutosaveName) {
+            panel.center()
+        }
         panel.setFrameAutosaveName(Self.frameAutosaveName)
 
         lineField = field
@@ -87,9 +96,16 @@ final class LinePanelController: NSWindowController, NSWindowRestoration {
 
     /// Reopens the panel when the app's saved state is restored
     /// (reference/apple/LinePanelController.m:67-73).
+    /// Any other identifier is not this class's window: AppKit gets an error.
     static func restoreWindow(withIdentifier identifier: NSUserInterfaceItemIdentifier, state: NSCoder,
                               completionHandler: @escaping (NSWindow?, (any Error)?) -> Void) {
-        completionHandler(identifier == panelIdentifier ? shared.loadPanelIfNeeded() : nil, nil)
+        guard identifier == panelIdentifier else {
+            completionHandler(nil, NSError(domain: NSCocoaErrorDomain, code: NSFeatureUnsupportedError, userInfo: [
+                NSLocalizedDescriptionKey: "The Select Line panel cannot restore a window named \u{201C}\(identifier.rawValue)\u{201D}.",
+            ]))
+            return
+        }
+        completionHandler(shared.loadPanelIfNeeded(), nil)
     }
 
     // MARK: Actions
@@ -126,11 +142,22 @@ final class LinePanelController: NSWindowController, NSWindowRestoration {
         window.makeKeyAndOrderFront(nil)
     }
 
-    /// Selects in the main window's first responder when it is a text view,
-    /// as TextEdit does; does nothing otherwise.
+    /// Selects in the main window's text, as TextEdit does; does nothing
+    /// when the main window has no text view.
     func selectLinesInMainWindow(_ description: String) throws {
-        guard let textView = NSApp.mainWindow?.firstResponder as? NSTextView else { return }
+        guard let textView = Self.documentTextView(in: mainWindow()) else { return }
         try Self.selectLines(description, in: textView)
+    }
+
+    /// The window's first responder when it is a text view, as in TextEdit.
+    /// A field editor (the find bar's field, for one) is skipped for the
+    /// window's document text view.
+    static func documentTextView(in window: NSWindow?) -> NSTextView? {
+        guard let window else { return nil }
+        if let textView = window.firstResponder as? NSTextView, !textView.isFieldEditor {
+            return textView
+        }
+        return (window.windowController as? DocumentWindowController)?.textView
     }
 
     /// Parses `description`, selects those lines in `textView` and scrolls to them.
@@ -205,9 +232,11 @@ struct LineSpec: Equatable, Sendable {
         }
 
         if relative < 0 {
-            // Backwards from the current line, with lineRange as TextEdit does.
-            guard let end = Self.lineStart(movingBack: from - 1, from: start, in: string),
-                  let begin = Self.lineStart(movingBack: lineCount, from: end, in: string) else { return nil }
+            // Backwards from the current line. TextEdit steps back from - 1
+            // lines, none for 0 or less; clamping first keeps Int.min from overflowing.
+            let back = from > 0 ? from - 1 : 0
+            guard let end = LineScanner.skipLinesBack(back, from: start, in: string),
+                  let begin = LineScanner.skipLinesBack(lineCount, from: end, in: string) else { return nil }
             return NSRange(location: begin, length: end - begin)
         }
         // Forwards. An absolute entry counts from line 1, a relative one from 0.
@@ -216,23 +245,12 @@ struct LineSpec: Equatable, Sendable {
               let end = LineScanner.skipLines(lineCount, from: begin, in: string) else { return nil }
         return NSRange(location: begin, length: end - begin)
     }
-
-    /// Steps back `count` line starts from `location` (itself a line start).
-    private static func lineStart(movingBack count: Int, from location: Int, in string: NSString) -> Int? {
-        var location = location
-        var remaining = count
-        while remaining > 0 {
-            if location == 0 { return nil }
-            location = string.lineRange(for: NSRange(location: location - 1, length: 0)).location
-            remaining -= 1
-        }
-        return location
-    }
 }
 
-/// Counts lines forward with one pass over the string's UTF-16 code units,
-/// copied out a chunk at a time, instead of one `lineRange(for:)` call per
-/// line. Gives the same answers as repeated `NSMaxRange(lineRange(for:))`.
+/// Counts lines with one pass over the string's UTF-16 code units, copied
+/// out a chunk at a time, instead of one `lineRange(for:)` call per line.
+/// Forward it gives the same answers as repeated `NSMaxRange(lineRange(for:))`;
+/// backward, as repeated `lineRange(for: location - 1).location`.
 enum LineScanner {
     private static let chunkLength = 1 << 15
 
@@ -279,5 +297,45 @@ enum LineScanner {
             location = length
         }
         return remaining == 0 ? location : nil
+    }
+
+    /// The line start reached by moving back `count` lines from `location`,
+    /// or nil when the text starts first. Each step goes to the start of the
+    /// line before: the nearest line start below the current location.
+    /// Line starts are 0 and the index after each line end (after the LF of
+    /// a CRLF, never between its CR and LF).
+    static func skipLinesBack(_ count: Int, from location: Int, in string: NSString) -> Int? {
+        if count <= 0 { return location }
+        // Each line start below `location` is a different index, so there are
+        // at most `location` of them: a bigger count fails without a scan.
+        if count > location { return nil }
+        var remaining = count
+        let buffer = UnsafeMutablePointer<unichar>.allocate(capacity: chunkLength)
+        defer { buffer.deallocate() }
+        // A line end at location - 1 makes the line start at `location`
+        // itself, which does not count; the scan starts below it.
+        var chunkEnd = location - 1
+        var above = string.character(at: location - 1) // the unit just above the chunk
+        while chunkEnd > 0 {
+            let chunkStart = max(0, chunkEnd - chunkLength)
+            let n = chunkEnd - chunkStart
+            string.getCharacters(buffer, range: NSRange(location: chunkStart, length: n))
+            var i = n - 1
+            while i >= 0 {
+                let c = buffer[i]
+                // Fast path: most characters are above CR and are not NEL, LS or PS.
+                if c > 0x0D && c != 0x85 && (c & 0xFFFE) != 0x2028 { i -= 1; continue }
+                if c != 0x0A && c != 0x0D && c != 0x85 && c != 0x2028 && c != 0x2029 { i -= 1; continue }
+                // The CR of a CRLF: the line starts after the LF, counted already.
+                if c == 0x0D && (i + 1 < n ? buffer[i + 1] : above) == 0x0A { i -= 1; continue }
+                remaining -= 1
+                if remaining == 0 { return chunkStart + i + 1 }
+                i -= 1
+            }
+            above = buffer[0]
+            chunkEnd = chunkStart
+        }
+        // The first line starts at 0.
+        return remaining == 1 ? 0 : nil
     }
 }

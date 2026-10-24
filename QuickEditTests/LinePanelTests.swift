@@ -129,6 +129,85 @@ final class LinePanelTests: XCTestCase {
                                                            selection: NSRange(location: 0, length: 0)))
     }
 
+    /// M4 review row 3: entries that keep scanning past a CRLF split across
+    /// the chunk boundary, a lone CR at the chunk end, and a CR as the last
+    /// character. Each answer must match TextEdit's loop.
+    func testForwardScanAcrossChunkBoundaries() {
+        let chunk = 1 << 15
+        let prefix = String(repeating: "x", count: chunk - 1)
+        let texts = [
+            prefix + "\r\n" + "y\n" + "z",                       // CRLF split; lines 2 and 3 follow
+            prefix + "\r" + "y\n" + "z",                         // lone CR at the chunk end
+            prefix + "\r",                                       // CR is the last character
+            prefix + "\r\n",                                     // the split CRLF ends the text
+            String(repeating: "x", count: 2 * chunk - 1) + "\r\n" + "y\r\n" + "z", // split at the second boundary
+        ]
+        let entries = ["1", "2", "3", "4", "1-2", "1-3", "2-3", "+0", "+1", "+0-2", "+1-2"]
+        for text in texts {
+            let ns = text as NSString
+            for entry in entries {
+                let spec = LineSpec.parse(entry)!
+                let zero = NSRange(location: 0, length: 0)
+                XCTAssertEqual(spec.range(in: ns, selection: zero), Self.textEditRange(spec, in: ns, selection: zero),
+                               "\(entry) in a \(ns.length)-unit text ending \(text.suffix(6).debugDescription)")
+            }
+        }
+        // The split CRLF is one line end, so line 3 is "z" and lines 1-2 end after "y\n".
+        XCTAssertEqual(range("3", texts[0]), NSRange(location: chunk + 3, length: 1))
+        XCTAssertEqual(range("1-2", texts[0]), NSRange(location: 0, length: chunk + 3))
+        XCTAssertEqual(range("2", texts[1]), NSRange(location: chunk, length: 2))
+        XCTAssertEqual(range("1", texts[2]), NSRange(location: 0, length: chunk))
+        XCTAssertNil(range("2", texts[2]))
+    }
+
+    /// M4 review row 4: the reverse scan matches TextEdit's loop where a
+    /// line end falls on either side of a backward chunk boundary.
+    func testBackwardScanAcrossChunkBoundaries() {
+        let chunk = 1 << 15
+        let heads = ["a\r\nb", "a\rb", "\r\nb", "\n\rb", "a\u{2028}b", "a\r\n\r\nb"]
+        let pads = Array(chunk - 6...chunk + 1) + Array(2 * chunk - 5...2 * chunk)
+        let entries = ["-0", "-1", "-2", "-3", "-4", "-1-2", "-1-3", "-2-3"]
+        for head in heads {
+            for pad in pads {
+                let text = head + String(repeating: "x", count: pad) + "\n"
+                let ns = text as NSString
+                for location in [ns.length, ns.length - 1] {
+                    let selection = NSRange(location: location, length: 0)
+                    for entry in entries {
+                        let spec = LineSpec.parse(entry)!
+                        XCTAssertEqual(spec.range(in: ns, selection: selection),
+                                       Self.textEditRange(spec, in: ns, selection: selection),
+                                       "\(entry) from \(location) in \(head.debugDescription) + \(pad) x")
+                    }
+                }
+            }
+        }
+    }
+
+    /// M4 review row 1: a huge backward entry used to overflow `from - 1` and crash.
+    func testHugeEntriesDoNotOverflow() throws {
+        let text = "l1\nl2\nl3\nl4\nl5\n" as NSString
+        let line3 = NSRange(location: 6, length: 0)
+        // Int.min and near it: TextEdit's loop treats these as one line back
+        // (or the current line for "+"); compare with it.
+        for entry in ["--9223372036854775808", "+-9223372036854775808", "--9223372036854775807",
+                      "--9223372036854775808--9223372036854775808"] {
+            let spec = try XCTUnwrap(LineSpec.parse(entry), entry)
+            XCTAssertEqual(spec.range(in: text, selection: line3), Self.textEditRange(spec, in: text, selection: line3), entry)
+        }
+        // Too far back or a span too big to count: out of range, no crash.
+        for entry in ["-9223372036854775807", "-1-9223372036854775807", "--9223372036854775808-0",
+                      "--9223372036854775808-9223372036854775807", "-9223372036854775807-9223372036854775807",
+                      "+9223372036854775807", "+0-9223372036854775807"] {
+            XCTAssertNil(range(entry, text as String, selection: line3), entry)
+        }
+        let textView = makeTextView(text as String)
+        textView.setSelectedRange(line3)
+        XCTAssertThrowsError(try LinePanelController.selectLines("-9223372036854775807", in: textView))
+        try LinePanelController.selectLines("--9223372036854775808", in: textView)
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 3, length: 3))
+    }
+
     /// TextEdit's getRange:inTextView:fromLineSpec:toLineSpec:relative:, line
     /// for line (reference/apple/LinePanelController.m:94-137), as the oracle.
     static func textEditRange(_ spec: LineSpec, in string: NSString, selection: NSRange) -> NSRange? {
@@ -198,6 +277,64 @@ final class LinePanelTests: XCTestCase {
         XCTAssertEqual(textView.selectedRange(), NSRange(location: 4, length: 4))
         try LinePanelController.selectLines("1-3", in: textView)
         XCTAssertEqual(textView.selectedRange(), NSRange(location: 0, length: 14))
+    }
+
+    /// M4 review row 5: Select Line changes the main window only.
+    func testSelectLineActsOnTheMainWindowOnly() throws {
+        let text = "one\ntwo\nthree\n"
+        let first = makeTextView(text)
+        let second = makeTextView(text)
+        let start = NSRange(location: 1, length: 0)
+        first.setSelectedRange(start)
+        second.setSelectedRange(start)
+        let controller = LinePanelController()
+        XCTAssertTrue(controller.mainWindow() === NSApp.mainWindow, "the default is not AppKit's main window")
+
+        controller.mainWindow = { second.window }
+        try controller.selectLinesInMainWindow("2")
+        XCTAssertEqual(second.selectedRange(), NSRange(location: 4, length: 4))
+        XCTAssertEqual(first.selectedRange(), start, "a window that is not main changed")
+
+        controller.mainWindow = { first.window }
+        try controller.selectLinesInMainWindow("3")
+        XCTAssertEqual(first.selectedRange(), NSRange(location: 8, length: 6))
+        XCTAssertEqual(second.selectedRange(), NSRange(location: 4, length: 4), "a window that is not main changed")
+    }
+
+    /// M4 review row 8: with the find bar's field focused, Select Line acts on
+    /// the document's text view, not on the field editor.
+    func testSelectLineSkipsTheFindBarFieldEditor() throws {
+        let document = TextDocument()
+        document.makeWindowControllers()
+        defer { document.close() }
+        let windowController = try XCTUnwrap(document.windowControllers.first as? DocumentWindowController)
+        let textView = windowController.textView
+        let window = try XCTUnwrap(windowController.window)
+        textView.insertText("one\ntwo\nthree\n", replacementRange: NSRange(location: 0, length: 0))
+        textView.setSelectedRange(NSRange(location: 0, length: 0))
+
+        let show = NSMenuItem()
+        show.tag = NSTextFinder.Action.showFindInterface.rawValue
+        textView.performTextFinderAction(show)
+        let findBar = try XCTUnwrap(textView.enclosingScrollView?.findBarView, "no find bar")
+        let search = try XCTUnwrap(Self.firstSubview(of: findBar, as: NSSearchField.self), "no search field")
+        search.stringValue = "w"
+        XCTAssertTrue(window.makeFirstResponder(search))
+        let fieldEditor = try XCTUnwrap(window.firstResponder as? NSTextView)
+        XCTAssertTrue(fieldEditor.isFieldEditor, "the search field is not being edited")
+
+        let controller = LinePanelController()
+        controller.mainWindow = { window }
+        try controller.selectLinesInMainWindow("2")
+        XCTAssertEqual(textView.selectedRange(), NSRange(location: 4, length: 4))
+        XCTAssertEqual(fieldEditor.string, "w", "Select Line changed the find field")
+    }
+
+    private static func firstSubview<T: NSView>(of view: NSView, as type: T.Type) -> T? {
+        for subview in view.subviews {
+            if let match = subview as? T ?? firstSubview(of: subview, as: type) { return match }
+        }
+        return nil
     }
 
     func testErrorsUseTextEditMessages() {
@@ -276,7 +413,89 @@ final class LinePanelTests: XCTestCase {
         XCTAssertTrue(restored === LinePanelController.shared.window)
     }
 
+    /// M4 review row 9: an identifier that is not the panel's gets an error.
+    func testRestorationRejectsUnknownIdentifiersWithAnError() {
+        var called = false
+        var restored: NSWindow?
+        var failure: (any Error)?
+        LinePanelController.restoreWindow(withIdentifier: NSUserInterfaceItemIdentifier("NotTheLinePanel"),
+                                          state: NSKeyedArchiver(requiringSecureCoding: true)) { window, error in
+            called = true
+            restored = window
+            failure = error
+        }
+        XCTAssertTrue(called)
+        XCTAssertNil(restored)
+        XCTAssertNotNil(failure, "an unknown identifier was refused without an error")
+    }
+
+    /// M4 review row 7: with no saved frame the panel opens centered, not at
+    /// (0,0); a saved frame wins.
+    func testPanelCentersWithoutASavedFrame() throws {
+        let key = "NSWindow Frame \(LinePanelController.frameAutosaveName)"
+        let defaults = UserDefaults.standard
+        let saved = defaults.object(forKey: key)
+        defer {
+            if let saved { defaults.set(saved, forKey: key) } else { defaults.removeObject(forKey: key) }
+        }
+        defaults.removeObject(forKey: key)
+        let centered = LinePanelController().loadPanelIfNeeded()
+        let screen = try XCTUnwrap(centered.screen ?? NSScreen.main)
+        XCTAssertNotEqual(centered.frame.origin, .zero, "the panel opened at (0,0)")
+        XCTAssertEqual(centered.frame.midX, screen.visibleFrame.midX, accuracy: 1, "the panel is not centered")
+        centered.close()
+
+        let probe = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 253, height: 62), styleMask: [.titled, .closable],
+                             backing: .buffered, defer: true)
+        probe.isReleasedWhenClosed = false
+        probe.setFrameOrigin(NSPoint(x: screen.visibleFrame.minX + 40, y: screen.visibleFrame.minY + 50))
+        defaults.set(probe.frameDescriptor, forKey: key)
+        let placed = LinePanelController().loadPanelIfNeeded()
+        XCTAssertEqual(placed.frame.origin, probe.frame.origin, "the saved frame was not used")
+        placed.close()
+    }
+
     // MARK: Speed
+
+    /// M4 review row 4: "-999999" from the end of 100 MB goes back to line 2
+    /// with one reverse scan, and a huge backward entry fails at once. The
+    /// optimized run is the same as for testSelectLineOneMillionIn100MB.
+    func testSelectLineBackNearlyOneMillionIn100MB() throws {
+        let line = String(repeating: "x", count: 99) + "\n"
+        let storage = NSTextStorage(string: String(repeating: line, count: 1_000_000))
+        let text = storage.mutableString
+        let end = NSRange(location: text.length, length: 0)
+        let spec = try XCTUnwrap(LineSpec.parse("-999999"))
+        let expected = NSRange(location: 100, length: 100)
+
+        var times: [Double] = []
+        for _ in 0..<5 {
+            let start = DispatchTime.now().uptimeNanoseconds
+            let range = spec.range(in: text, selection: end)
+            times.append(Double(DispatchTime.now().uptimeNanoseconds - start) / 1e6)
+            XCTAssertEqual(range, expected)
+        }
+        times.sort()
+        let optimized = !_isDebugAssertConfiguration()
+        let build = optimized ? "optimized (-O)" : "unoptimized (-Onone)"
+        let limit = optimized ? 200.0 : 2_000.0
+        let report = String(format: "Select Line -999999 from the end of 100 MB, %@: best %.1f ms, median %.1f ms, worst %.1f ms",
+                            build, times[0], times[2], times[4])
+        print(report)
+        let attachment = XCTAttachment(string: report)
+        attachment.name = "select-line-back-timing"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        XCTAssertLessThan(times[2], limit, report)
+
+        // More lines back than the text holds: no walk over the text.
+        let huge = try XCTUnwrap(LineSpec.parse("-9223372036854775807"))
+        let start = DispatchTime.now().uptimeNanoseconds
+        XCTAssertNil(huge.range(in: text, selection: end))
+        let hugeMs = Double(DispatchTime.now().uptimeNanoseconds - start) / 1e6
+        print(String(format: "Select Line -9223372036854775807 from the end of 100 MB: %.3f ms", hugeMs))
+        XCTAssertLessThan(hugeMs, 20, "a huge backward entry walked the text")
+    }
 
     /// 1,000,000 lines of 100 bytes: 100 MB, the size of the biggest bench
     /// fixture. Line 1,000,000 is the last line, so the scan reads it all.
