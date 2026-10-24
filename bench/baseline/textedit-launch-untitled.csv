@@ -1,0 +1,2 @@
+label,metric,n,median_ms,min_ms,max_ms,mean_ms,sd_ms,discards
+TextEditUntitled,window_visible,7,276.6,260.4,281.3,273.7,8.2,0

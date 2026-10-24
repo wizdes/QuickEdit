@@ -58,7 +58,7 @@ code{font-family:var(--mono);font-size:.88em;background:var(--panel);padding:1px
     <h2>Your decisions</h2>
     <div class="grid2">
       <div class="card"><span class="eyebrow">Format</span><p>Plain text only. No rich text, RTF, RTFD, HTML or Word files.</p></div>
-      <div class="card"><span class="eyebrow">Language</span><p>Swift on AppKit, using NSTextView (Apple's built-in text view). The old Objective-C is built once as a reference copy.</p></div>
+      <div class="card"><span class="eyebrow">Language</span><p>Swift on AppKit, using NSTextView (Apple's built-in text view). The old Objective-C is built once as a reference copy. <strong>Text engine: TextKit 1</strong>, the older layout engine. Astra and Fable both voted for it (2 of 2), because Wrap to Page and printing only work there.</p></div>
       <div class="card"><span class="eyebrow">Name</span><p>QuickEdit, bundle ID <code>dev.yili.QuickEdit</code>.</p></div>
       <div class="card"><span class="eyebrow">Hard questions</span><p>Astra and Fable each vote. The most votes win, and I break ties. Every vote is logged in <code>docs/decisions.md</code>.</p></div>
     </div>
@@ -146,13 +146,13 @@ code{font-family:var(--mono);font-size:.88em;background:var(--panel);padding:1px
     <span class="eyebrow">Risks</span>
     <ul>
       <li>UI tests and speed timing need this Mac's screen unlocked. When it is locked, I log those checks as not run and keep building the rest.</li>
-      <li>TextKit 2, the newer text layout engine, is slow on very long single lines. M8 may switch big files to the older engine. Astra and Fable vote on that choice.</li>
+      <li>Even TextKit 1 has a ceiling. CotEditor's maintainer puts it near 120 MB. This Mac has 8 GB of memory, so 1 GB files will need a limited viewing mode. M8 also re-tests TextKit 2 on a 100 MB file, the one result that would reopen the vote.</li><li>The login keychain is locked in my shell, so builds are ad-hoc signed and not notarized until you run <code>security unlock-keychain</code>. They still run on this Mac.</li>
       <li>The side-by-side script drives the real TextEdit, using scratch files only.</li>
     </ul>
   </section>
 
   <section>
     <h2>Status</h2>
-    <p><span class="pill now">stage 0</span> Research running: a map of the old code, and Mac speed research. TextEdit's launch time is measured. <span class="pill">M1–M10</span> not started.</p>
+    <p><span class="pill ok">stage 0 done</span> Code map, speed research, X posts, behavior checklist, builder spec, text engine vote. The old Apple TextEdit builds on Xcode 27 after 2 fixes. <span class="pill now">M1 building</span> <span class="pill">M2–M10</span> not started.</p>
   </section>
 </div>

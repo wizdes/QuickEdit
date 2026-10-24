@@ -16,6 +16,7 @@
 
 ## Measured on this Mac (Mac14,3, 8 GiB, macOS 27.0.1)
 - System TextEdit launch to visible window: median 265.2 ms, min 216.6, max 270.3, n=7 (`bench/baseline/textedit-launch.csv`).
+- System TextEdit launched with `-NSShowAppCentricOpenPanelInsteadOfUntitledFile NO` (argument domain, nothing on disk changes): median 276.6 ms, min 260.4, max 281.3, n=7 (`bench/baseline/textedit-launch-untitled.csv`). In both runs the first window was 656 x 422 points; without Screen Recording permission root cannot see whether that is a blank document or the Open panel. The bar stays at the lower number, 265.2 ms.
 - `xcrun xctrace list instruments` prints "No instruments found", so Instruments recording does not work from the shell yet. Speed proof uses our own timing harness plus `os_signpost`.
 
 ## Speed rules for builders (from Astra's top 15)
