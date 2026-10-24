@@ -25,7 +25,14 @@ final class DocumentLifeTests: QuickEditUITestCase {
         waitUntil(10, "no duplicate window; windows: \(app.windows.allElementsBoundByIndex.map(\.title))") {
             self.app.windows.count == 2
         }
-        XCTAssertEqual(app.windows.firstMatch.textViews.firstMatch.value as? String, "locked text\n")
+        // As in TextEdit (checked 2026-10-24): the front window is the
+        // locked copy and holds the edit; the original window shows the
+        // file's text again. macOS may capitalize the typed "x".
+        let copy = (app.windows.firstMatch.textViews.firstMatch.value as? String) ?? ""
+        XCTAssertEqual(copy.lowercased(), "locked text\nx", "the copy does not hold the edit")
+        let originalWindow = app.windows.matching(NSPredicate(format: "title BEGINSWITH 'locked.txt'")).firstMatch
+        XCTAssertTrue(originalWindow.exists, "no original window; windows: \(app.windows.allElementsBoundByIndex.map(\.title))")
+        XCTAssertEqual(originalWindow.textViews.firstMatch.value as? String, "locked text\n")
         XCTAssertEqual(bytes(url), original, "the locked file must not change")
     }
 
@@ -121,11 +128,13 @@ final class DocumentLifeTests: QuickEditUITestCase {
         app.typeKey(.return, modifierFlags: [])
         waitUntil(10, "rename did not happen") { self.bytes(renamed) == content && self.bytes(original) == nil }
 
-        // Move To…: the popover's location menu, Other…, then Go to Folder.
+        // Move To…: the location menu, Other…, then Go to Folder. On macOS 27
+        // Move To is a sheet on the window ("Move To:" pop-up, Move button),
+        // not a popover.
         chooseMenu("File", "Move To\u{2026}")
-        let popover = app.popovers.firstMatch
-        XCTAssertTrue(popover.waitForExistence(timeout: 5), "no Move To popover")
-        popover.popUpButtons.firstMatch.click()
+        let moveSheet = app.windows.firstMatch.sheets.firstMatch
+        XCTAssertTrue(moveSheet.waitForExistence(timeout: 5), "no Move To sheet")
+        moveSheet.popUpButtons.firstMatch.click()
         app.menuItems["Other\u{2026}"].firstMatch.click()
         app.typeKey("g", modifierFlags: [.command, .shift])
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
@@ -133,7 +142,7 @@ final class DocumentLifeTests: QuickEditUITestCase {
         app.typeKey(.return, modifierFlags: [])
         RunLoop.current.run(until: Date().addingTimeInterval(1.0))
         app.typeKey(.return, modifierFlags: [])
-        if popover.exists { popover.buttons["Move"].firstMatch.click() }
+        if moveSheet.exists { moveSheet.buttons["Move"].firstMatch.click() }
         waitUntil(10, "move did not happen") { self.bytes(moved) == content && self.bytes(renamed) == nil }
         XCTAssertEqual(bytes(folder.appendingPathComponent("copy.txt")), content, "the copy is unchanged")
     }

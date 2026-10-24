@@ -19,8 +19,13 @@ final class EncodingPanelTests: QuickEditUITestCase {
         launch()
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
         app.typeKey("o", modifierFlags: .command)
-        let panel = app.sheets.firstMatch.waitForExistence(timeout: 5) ? app.sheets.firstMatch : app.dialogs.firstMatch
-        XCTAssertTrue(panel.exists, "no Open panel")
+        // On macOS 27 the Open panel is a window titled "Open" (identifier
+        // "open-panel"), not a sheet or a dialog.
+        let openWindow = app.windows["Open"]
+        XCTAssertTrue(openWindow.waitForExistence(timeout: 5) || app.sheets.firstMatch.exists || app.dialogs.firstMatch.exists,
+                      "no Open panel")
+        let panel = openWindow.exists ? openWindow
+            : (app.sheets.firstMatch.exists ? app.sheets.firstMatch : app.dialogs.firstMatch)
         let popUp = panel.popUpButtons["openEncoding"]
         XCTAssertEqual(popUp.value as? String, "Automatic", "the pop-up starts at Automatic")
         attachScreenshot("open-panel-encoding", app.windows.firstMatch.screenshot())

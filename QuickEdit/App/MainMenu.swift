@@ -55,6 +55,17 @@ enum MainMenu {
         menu.addItem(item("Open\u{2026}", #selector(NSDocumentController.openDocument(_:)), "o"))
         let recent = NSMenu(title: "Open Recent")
         recent.addItem(item("Clear Menu", #selector(NSDocumentController.clearRecentDocuments(_:))))
+        // Edit.nib names this menu "_NSRecentDocumentsMenu". Set in code, the
+        // name works without the leading underscore (with it, measured
+        // 2026-10-24, AppKit still adds its own). Without
+        // the name AppKit does not recognise the menu and adds a second Open
+        // Recent above it (first UI test run, 2026-10-24).
+        let setMenuName = NSSelectorFromString("_setMenuName:")
+        if recent.responds(to: setMenuName) {
+            recent.perform(setMenuName, with: "NSRecentDocumentsMenu")
+        } else {
+            FileHandle.standardError.write(Data("QuickEdit: NSMenu has no _setMenuName:; File > Open Recent will appear twice\n".utf8))
+        }
         menu.addItem(submenuItem(recent))
         menu.addItem(.separator())
         menu.addItem(item("Close", #selector(NSWindow.performClose(_:)), "w"))
@@ -170,6 +181,11 @@ enum MainMenu {
         menu.addItem(item("Actual Size", #selector(ScalingScrollView.zoomToActualSize(_:)), "0"))
         menu.addItem(item("Zoom In", #selector(ScalingScrollView.zoomIn(_:)), ".", [.command, .shift]))
         menu.addItem(item("Zoom Out", #selector(ScalingScrollView.zoomOut(_:)), ",", [.command, .shift]))
+        // AppKit's own full-screen item has no Ctrl+Cmd+F on macOS 27
+        // (measured 2026-10-24), while TextEdit's key works. With this item
+        // in the menu AppKit adds no second one.
+        menu.addItem(.separator())
+        menu.addItem(item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]))
         return menu
     }
 

@@ -283,6 +283,16 @@ final class MainMenuTests: XCTestCase {
                        ["Prevent Editing||toggleReadOnly:", "Wrap to Page|Shift+Cmd+W|togglePageBreaks:"])
     }
 
+    /// The app's real File menu has one Open Recent item. AppKit adds its own
+    /// Open Recent after Open… unless it recognises the one the menu already
+    /// has; the first UI test run (2026-10-24) found two.
+    func testRealFileMenuHasOneOpenRecent() throws {
+        let file = try menu("File", in: try XCTUnwrap(NSApp.mainMenu))
+        file.update()
+        let titles = file.items.map(\.title)
+        XCTAssertEqual(titles.filter { $0 == "Open Recent" }.count, 1, "File menu: \(titles)")
+    }
+
     /// AppKit fills Open Recent in the app's real menu bar.
     func testOpenRecentFillsFromRecentDocuments() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("recent-\(UUID().uuidString).txt")

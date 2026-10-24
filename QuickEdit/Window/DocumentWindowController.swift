@@ -147,8 +147,15 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
             let printInfo = textDocument?.printInfo ?? NSPrintInfo.shared
             let pagesView = MultiplePageView(printInfo: printInfo)
             scrollView.documentView = pagesView
-            addPage()
-            if hadViews { layoutManager.removeTextContainer(at: 0) }
+            // The first page goes in front of the old view, not after it:
+            // AppKit hands the shared input context to a view inserted
+            // first, but not when the first view is removed, and keystrokes
+            // would then go to the old, detached view. The page callback
+            // waits until the old view is gone.
+            layoutManager.delegate = nil
+            addPage(inFront: hadViews)
+            if hadViews { layoutManager.removeTextContainer(at: 1) }
+            layoutManager.delegate = self
             scrollView.hasVerticalScroller = true
             scrollView.hasHorizontalScroller = true
             // The area around and between pages. TextEdit's nib uses
@@ -190,13 +197,17 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
 
     /// Adds one page: a container the size of the page's text area and a
     /// fixed-size text view on it (DocumentWindowController.m:459-495).
-    private func addPage() {
+    private func addPage(inFront: Bool = false) {
         guard let pagesView else { return }
         let page = pagesView.numberOfPages
         pagesView.setNumberOfPages(page + 1)
         let (textView, container) = TextViewFactory.makePageTextView(frame: pagesView.documentRect(forPage: page))
         pagesView.addSubview(textView)
-        layoutManager.addTextContainer(container)
+        if inFront {
+            layoutManager.insertTextContainer(container, at: 0)
+        } else {
+            layoutManager.addTextContainer(container)
+        }
     }
 
     /// Removes the last page (DocumentWindowController.m:497-506).

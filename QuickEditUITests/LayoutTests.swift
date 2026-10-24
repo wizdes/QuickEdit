@@ -13,6 +13,14 @@ final class LayoutTests: QuickEditUITestCase {
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
         let before = window.frame
         let screen = try XCTUnwrap(NSScreen.main).frame
+        // One full-screen item only: AppKit must not add its own next to
+        // the View menu's "Enter Full Screen".
+        let view = app.menuBars.menuBarItems["View"]
+        view.click()
+        let fullScreenItems = view.menuItems.matching(identifier: "toggleFullScreen:")
+        XCTAssertEqual(fullScreenItems.count, 1,
+                       "View menu: \(view.menuItems.allElementsBoundByIndex.map(\.title))")
+        app.typeKey(.escape, modifierFlags: [])
         app.typeKey("f", modifierFlags: [.command, .control])
         waitUntil(10, "the window did not fill the screen") {
             self.window.frame.width >= screen.width - 1 && self.window.frame.height >= screen.height - 40
@@ -30,14 +38,17 @@ final class LayoutTests: QuickEditUITestCase {
         waitUntil(10, "Cmd+N did not add a window") { self.app.windows.count == 2 }
         chooseMenu("Window", "Merge All Windows")
         waitUntil(10, "the windows did not merge") { self.app.windows.count == 1 }
-        XCTAssertEqual(window.tabGroups.firstMatch.radioButtons.count, 2, "two tabs expected")
+        // macOS 27 reports each tab as a Tab element, not a radio button.
+        XCTAssertEqual(window.tabGroups.firstMatch.tabs.count, 2, "two tabs expected")
         attachScreenshot("merged-tabs", XCUIScreen.main.screenshot())
     }
 
     /// Shift+Cmd+W makes pages; typing past a page adds a page; the menu
     /// title flips; Cmd+> and Cmd+< zoom; Shift+Cmd+W goes back.
     func testWrapToPageAddsPagesAndZooms() throws {
-        launch()
+        // macOS capitalizes the first word of each typed line unless this
+        // system setting is off; the text below must arrive as typed.
+        launch(extraArguments: ["-NSAutomaticCapitalizationEnabled", "NO"])
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
         textView.click()
         app.typeKey("w", modifierFlags: [.command, .shift])
@@ -78,22 +89,40 @@ final class LayoutTests: QuickEditUITestCase {
         app.typeKey("w", modifierFlags: [.command, .shift])
         let page = app.textViews.firstMatch
         XCTAssertTrue(page.waitForExistence(timeout: 5))
-        let pageShot = page.screenshot()
+        // The page's text view is taller than the window, so its own
+        // screenshot also shows the desktop below the window. Measure only
+        // the part of the page the window shows.
+        let shownPage = page.frame.intersection(window.scrollViews.firstMatch.frame)
+        XCTAssertFalse(shownPage.isEmpty, "the page is not in the window: \(page.frame)")
+        let pageShot = window.screenshot()
         attachScreenshot("dark-page", pageShot)
-        let pageBrightness = try averageBrightness(pageShot)
+        let pageBrightness = try averageBrightness(pageShot, of: shownPage, in: window.frame)
         XCTAssertGreaterThan(pageBrightness, 0.8, "the page should stay white in dark mode")
         XCTAssertLessThan(pageBrightness, 0.995, "no dark text was seen on the page")
     }
 
-    /// Mean brightness (0 black, 1 white) of a screenshot.
-    private func averageBrightness(_ shot: XCUIScreenshot) throws -> Double {
+    /// Mean brightness (0 black, 1 white) of a screenshot, or of the part
+    /// of it at `area` (screen points) when the shot shows `shotFrame`.
+    private func averageBrightness(_ shot: XCUIScreenshot, of area: CGRect? = nil,
+                                   in shotFrame: CGRect? = nil) throws -> Double {
         let data = try XCTUnwrap(shot.image.tiffRepresentation)
         let rep = try XCTUnwrap(NSBitmapImageRep(data: data))
+        var xs = 0..<rep.pixelsWide, ys = 0..<rep.pixelsHigh
+        if let area, let shotFrame {
+            // Screen points to pixels; both have y growing down here.
+            let scale = CGFloat(rep.pixelsWide) / shotFrame.width
+            let left = Int(((area.minX - shotFrame.minX) * scale).rounded(.up))
+            let right = Int(((area.maxX - shotFrame.minX) * scale).rounded(.down))
+            let top = Int(((area.minY - shotFrame.minY) * scale).rounded(.up))
+            let bottom = Int(((area.maxY - shotFrame.minY) * scale).rounded(.down))
+            xs = max(0, left)..<min(rep.pixelsWide, right)
+            ys = max(0, top)..<min(rep.pixelsHigh, bottom)
+        }
         var total = 0.0
         var count = 0
         let step = 4
-        for y in stride(from: 0, to: rep.pixelsHigh, by: step) {
-            for x in stride(from: 0, to: rep.pixelsWide, by: step) {
+        for y in stride(from: ys.lowerBound, to: ys.upperBound, by: step) {
+            for x in stride(from: xs.lowerBound, to: xs.upperBound, by: step) {
                 guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
                 total += (color.redComponent + color.greenComponent + color.blueComponent) / 3
                 count += 1

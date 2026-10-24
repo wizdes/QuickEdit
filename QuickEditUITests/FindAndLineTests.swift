@@ -8,8 +8,8 @@ import XCTest
 /// change what was typed.
 final class FindAndLineTests: QuickEditUITestCase {
     /// Launches with an empty untitled window and types `text` into it.
-    private func launchWithText(_ text: String) {
-        launch()
+    private func launchWithText(_ text: String, extraArguments: [String] = []) {
+        launch(extraArguments: extraArguments)
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
         textView.click()
         app.typeText(text)
@@ -90,6 +90,11 @@ final class FindAndLineTests: QuickEditUITestCase {
         app.typeKey("f", modifierFlags: [.command, .option])
         let find = app.searchFields.firstMatch
         XCTAssertTrue(find.waitForExistence(timeout: 5), "Opt+Cmd+F did not show the find bar")
+        // Opt+Cmd+F puts the focus in the replace field, and the find field
+        // may hold an earlier search (the find pasteboard is shared), so
+        // focus the find field and replace what is in it.
+        find.click()
+        find.typeKey("a", modifierFlags: .command)
         find.typeText("fox")
         // The replace field is the second field of the bar.
         let replace = app.searchFields.count > 1 ? app.searchFields.element(boundBy: 1) : app.textFields.firstMatch
@@ -141,12 +146,16 @@ final class FindAndLineTests: QuickEditUITestCase {
 
     private static let twentyLines = (1...20).map { "L\($0)" }.joined(separator: "\n")
 
+    /// The Select Line panel. macOS 27 reports this NSPanel as a dialog,
+    /// not a window, so app.windows never finds it.
+    private var selectLinePanel: XCUIElement { app.dialogs["Select Line"] }
+
     /// Cmd+L, type 20, Return: line 20 is selected and the panel closes.
     func testSelectLineSelectsTheLine() {
         launchWithText(Self.twentyLines)
         app.typeKey(.upArrow, modifierFlags: .command)
         app.typeKey("l", modifierFlags: .command)
-        let panel = app.windows["Select Line"]
+        let panel = selectLinePanel
         XCTAssertTrue(panel.waitForExistence(timeout: 5), "Cmd+L did not open the Select Line panel")
         let field = panel.textFields.firstMatch
         XCTAssertEqual(field.placeholderValue, "Line number")
@@ -177,7 +186,7 @@ final class FindAndLineTests: QuickEditUITestCase {
         waitUntil(5, "Cmd+N did not open a second window") { self.app.windows.count >= 2 }
         app.typeText("1\n2\n3")
         app.typeKey("l", modifierFlags: .command)
-        let panel = app.windows["Select Line"]
+        let panel = selectLinePanel
         XCTAssertTrue(panel.waitForExistence(timeout: 5))
         app.typeText("2")
         app.typeKey(.return, modifierFlags: [])
@@ -191,14 +200,17 @@ final class FindAndLineTests: QuickEditUITestCase {
     /// M4 review row 8: with the find bar's field focused, Select Line still
     /// selects in the document, not in the find field.
     func testSelectLineWithTheFindFieldFocused() {
-        launchWithText(Self.twentyLines)
+        // The Debug app copies the document's selection into the text view's
+        // label (QuickEdit/App/TestHooks.swift), so the test reads it without
+        // keys: Cmd+E would act on the focused find field.
+        launchWithText(Self.twentyLines, extraArguments: ["-QETestExposeSelection", "YES"])
         app.typeKey(.upArrow, modifierFlags: .command)
         app.typeKey("f", modifierFlags: .command)
         let search = app.searchFields.firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 5), "Cmd+F did not show the find bar")
         search.typeText("L1")
         app.typeKey("l", modifierFlags: .command)
-        let panel = app.windows["Select Line"]
+        let panel = selectLinePanel
         XCTAssertTrue(panel.waitForExistence(timeout: 5))
         app.typeText("20")
         app.typeKey(.return, modifierFlags: [])
@@ -206,15 +218,24 @@ final class FindAndLineTests: QuickEditUITestCase {
         XCTAssertFalse(app.staticTexts["Invalid line specification \u{201C}20\u{201D}."].exists,
                        "Select Line looked for line 20 in the find field")
         XCTAssertEqual(search.value as? String, "L1", "Select Line changed the find field")
+        // Read the selection while the find bar is still open: Escape in the
+        // find field selects the bar's current match ("L1"), as AppKit's
+        // incremental find does.
+        XCTAssertTrue(search.exists, "the find bar closed")
+        waitUntil(5, "the selection is \(self.textView.label.debugDescription)") {
+            self.textView.label == "selection:L20"
+        }
         app.typeKey(.escape, modifierFlags: [])
-        XCTAssertEqual(selectedText(), "L20")
+        let focused = NSPredicate(format: "hasKeyboardFocus == true")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: focused, object: textView)], timeout: 5),
+                       .completed, "the text view did not get the focus back after Escape")
     }
 
     /// A bad entry shows TextEdit's message on the panel.
     func testSelectLineRejectsBadEntry() {
         launchWithText(Self.twentyLines)
         app.typeKey("l", modifierFlags: .command)
-        let panel = app.windows["Select Line"]
+        let panel = selectLinePanel
         XCTAssertTrue(panel.waitForExistence(timeout: 5))
         app.typeText("99")
         app.typeKey(.return, modifierFlags: [])

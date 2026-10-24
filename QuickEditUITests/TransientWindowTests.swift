@@ -7,16 +7,19 @@ final class TransientWindowTests: QuickEditUITestCase {
         let url = try fixtureFolder("transient").appendingPathComponent("replace.txt")
         // The untitled window starts away from the center (a Debug launch
         // argument places it as it is made; dragging it would end the
-        // transient state), so a matching frame proves it was copied.
-        launch(extraArguments: ["-QETestUntitledTopLeft", "{40, 700}"])
+        // transient state), so a matching frame proves it was copied. The
+        // point is quoted: launch arguments are read as property lists, and
+        // a bare "{40, 700}" is not one, so the app read nothing.
+        launch(extraArguments: ["-QETestUntitledTopLeft", "\"{40, 700}\""])
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
         XCTAssertEqual(app.windows.count, 1, "launch shows one untitled window")
         let untitledFrame = app.windows.firstMatch.frame
         XCTAssertEqual(untitledFrame.minX, 40, accuracy: 1, "the untitled window was not moved: \(untitledFrame)")
 
         app.typeKey("o", modifierFlags: .command)
-        XCTAssertTrue(app.sheets.firstMatch.waitForExistence(timeout: 5) || app.dialogs.firstMatch.waitForExistence(timeout: 5),
-                      "no Open panel")
+        // On macOS 27 the Open panel is a window titled "Open", not a sheet or a dialog.
+        XCTAssertTrue(app.windows["Open"].waitForExistence(timeout: 5) || app.sheets.firstMatch.exists
+                      || app.dialogs.firstMatch.exists, "no Open panel")
         app.typeKey("g", modifierFlags: [.command, .shift])
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         app.typeText(url.path)

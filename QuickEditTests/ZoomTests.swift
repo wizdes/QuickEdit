@@ -59,7 +59,12 @@ final class ZoomTests: XCTestCase {
 
     func testViewMenuItems() throws {
         let menu = try viewMenu()
-        XCTAssertEqual(menu.items.map(\.title), ["Actual Size", "Zoom In", "Zoom Out"])
+        XCTAssertEqual(menu.items.map(\.title), ["Actual Size", "Zoom In", "Zoom Out", "", "Enter Full Screen"])
+        XCTAssertTrue(menu.items[3].isSeparatorItem)
+        let fullScreen = menu.items[4]
+        XCTAssertEqual(fullScreen.action, #selector(NSWindow.toggleFullScreen(_:)))
+        XCTAssertEqual(fullScreen.keyEquivalent, "f")
+        XCTAssertEqual(fullScreen.keyEquivalentModifierMask, [.command, .control])
         let actual = try item("Actual Size"), zoomIn = try item("Zoom In"), zoomOut = try item("Zoom Out")
         XCTAssertEqual(actual.action, #selector(ScalingScrollView.zoomToActualSize(_:)))
         XCTAssertEqual(actual.keyEquivalent, "0")

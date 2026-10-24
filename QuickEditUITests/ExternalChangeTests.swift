@@ -2,11 +2,13 @@ import XCTest
 
 /// M2 n3: a file changed by another app. The write comes from a separate
 /// /bin/sh process that the Debug app starts (-QETestExternalWrite), because
-/// the sandboxed test runner cannot write the fixture files.
+/// the sandboxed test runner cannot write the fixture files. Each value
+/// follows its own flag (AppKit opens a bare launch argument as a document),
+/// and the text has backslash-n for a newline (see QuickEdit/App/TestHooks.swift).
 final class ExternalChangeTests: QuickEditUITestCase {
     func testCleanDocumentReloads() throws {
         let url = try fixtureFolder("external-clean").appendingPathComponent("outside.txt")
-        launch(opening: url.path, extraArguments: ["-QETestExternalWrite", url.path, "after\n", "3"])
+        launch(opening: url.path, extraArguments: ["-QETestExternalWrite", url.path, "-QETestExternalWriteText", "after\\n", "-QETestExternalWriteDelay", "3"])
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
         XCTAssertEqual(text, "before\n")
         waitForBytes(url, Array("after\n".utf8), timeout: 10)
@@ -17,7 +19,7 @@ final class ExternalChangeTests: QuickEditUITestCase {
 
     func testEditedDocumentShowsConflictOnSave() throws {
         let url = try fixtureFolder("external-edited").appendingPathComponent("outside.txt")
-        launch(opening: url.path, extraArguments: ["-QETestExternalWrite", url.path, "theirs\n", "4"])
+        launch(opening: url.path, extraArguments: ["-QETestExternalWrite", url.path, "-QETestExternalWriteText", "theirs\\n", "-QETestExternalWriteDelay", "4"])
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
         app.typeKey(.downArrow, modifierFlags: .command)
         app.typeText("mine")
@@ -32,7 +34,14 @@ final class ExternalChangeTests: QuickEditUITestCase {
                       "sheet says: \(sheetText)")
         attachScreenshot("external-change-conflict", app.windows.firstMatch.screenshot())
         XCTAssertEqual(bytes(url), Array("theirs\n".utf8), "nothing written before the user chooses")
-        sheet.buttons["Cancel"].click()
-        app.typeKey("z", modifierFlags: .command)
+        // Leave nothing to save. macOS 27's sheet has Save As…, Revert and
+        // Save Anyway, and no Cancel; Revert keeps the other app's bytes.
+        if sheet.buttons["Cancel"].exists {
+            sheet.buttons["Cancel"].click()
+            app.typeKey("z", modifierFlags: .command)
+        } else {
+            sheet.buttons["Revert"].click()
+        }
+        XCTAssertTrue(sheet.waitForNonExistence(timeout: 5), "the conflict sheet did not close")
     }
 }

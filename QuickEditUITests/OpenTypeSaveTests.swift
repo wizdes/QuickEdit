@@ -126,11 +126,13 @@ final class OpenTypeSaveTests: QuickEditUITestCase {
     }
 
     /// The front window's "edited" state, read from its close button the way
-    /// VoiceOver does, or from the "Edited" marker in the title.
+    /// VoiceOver does, or from the "Edited" marker in the title. On macOS 27
+    /// the marker is the title's document-actions menu button, titled "Edited".
     private func isEdited() -> Bool {
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         let window = app.windows.firstMatch
         if window.title.contains("Edited") { return true }
+        if window.menuButtons["Edited"].exists { return true }
         let close = window.buttons[XCUIIdentifierCloseWindow]
         if close.exists, let value = close.value as? String, value.localizedCaseInsensitiveContains("edited") {
             return true

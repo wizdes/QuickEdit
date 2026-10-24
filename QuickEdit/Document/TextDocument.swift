@@ -430,6 +430,7 @@ final class TextDocument: NSDocument {
         checkbox.setFrameOrigin(NSPoint(x: 234, y: 7))
         accessory.addSubview(checkbox)
         savePanel.accessoryView = accessory
+        PlainTextExtensionPanelDelegate.install(on: savePanel)
 
         applyExtensionChoice(checkbox.state == .on, to: savePanel)
         if checkbox.state == .off {
