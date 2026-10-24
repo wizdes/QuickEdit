@@ -22,13 +22,22 @@ final class EncodingTests: XCTestCase {
 
     // MARK: The oracle
 
-    /// The encoding AppKit's plain-text reader picks for a file (what system
-    /// TextEdit shows with "Automatic"), or nil when AppKit refuses the file.
-    private func oracle(_ url: URL) -> UInt? {
+    /// What AppKit's plain-text reader does with a file (what system TextEdit
+    /// shows with "Automatic"): the encoding it picks, or the error when it
+    /// refuses the file.
+    private func oracle(_ url: URL) -> Result<UInt, NSError> {
         var attributes: NSDictionary?
-        guard (try? NSAttributedString(url: url, options: [.documentType: NSAttributedString.DocumentType.plain],
-                                       documentAttributes: &attributes)) != nil else { return nil }
-        return (attributes?[NSAttributedString.DocumentAttributeKey.characterEncoding] as? NSNumber)?.uintValue
+        do {
+            _ = try NSAttributedString(url: url, options: [.documentType: NSAttributedString.DocumentType.plain],
+                                       documentAttributes: &attributes)
+        } catch {
+            return .failure(error as NSError)
+        }
+        guard let encoding = (attributes?[NSAttributedString.DocumentAttributeKey.characterEncoding] as? NSNumber)?.uintValue else {
+            return .failure(NSError(domain: "EncodingTests", code: 0,
+                                    userInfo: [NSLocalizedDescriptionKey: "AppKit read the file but named no encoding"]))
+        }
+        return .success(encoding)
     }
 
     /// AppKit names both UTF-16 byte orders "UTF-16" (and both UTF-32 ones
@@ -48,28 +57,9 @@ final class EncodingTests: XCTestCase {
     }
 
     /// Every fixture where QuickEdit and AppKit disagree, with both answers
-    /// pinned, so a change on either side fails this test.
-    private static let guessed = "AppKit never guesses: after xattr, BOM and UTF-8 it reads Mac Roman. QuickEdit asks NSString's guesser first (plan n1 step 1)."
-    private static let exceptions: [String: Exception] = [
-        "windows-1252": .init(quickEdit: String.Encoding.windowsCP1252.rawValue, appKit: 30, reason: guessed),
-        "windows-1252-crlf": .init(quickEdit: String.Encoding.windowsCP1252.rawValue, appKit: 30, reason: guessed),
-        "iso-latin-1": .init(quickEdit: String.Encoding.windowsCP1252.rawValue, appKit: 30,
-                             reason: guessed + " Windows-1252 is a superset of these Latin-1 bytes."),
-        "shift-jis": .init(quickEdit: String.Encoding.shiftJIS.rawValue, appKit: 30,
-                           reason: guessed + " The guess is Windows Japanese (cp932), a superset of Shift JIS."),
-        "big5": .init(quickEdit: 0x8000_0423, appKit: 30,
-                      reason: guessed + " The guess is Windows Traditional Chinese (cp950), a superset of Big5."),
-        "koi8-r": .init(quickEdit: String.Encoding.windowsCP1252.rawValue, appKit: 30,
-                        reason: guessed + " Both are wrong here; the guesser with TextEdit's list picks Windows Latin 1."),
-        "windows-1251": .init(quickEdit: String.Encoding.windowsCP1252.rawValue, appKit: 30,
-                              reason: guessed + " Both are wrong here; the guesser with TextEdit's list picks Windows Latin 1."),
-        "iso-8859-7": .init(quickEdit: String.Encoding.windowsCP1252.rawValue, appKit: 30,
-                            reason: guessed + " Both are wrong here; the guesser with TextEdit's list picks Windows Latin 1."),
-        "xattr-1252-over-emoji": .init(quickEdit: String.Encoding.utf8.rawValue, appKit: nil,
-                                       reason: "The xattr's encoding does not fit the bytes: AppKit refuses to open; QuickEdit skips the xattr."),
-        "xattr-stale-utf8": .init(quickEdit: String.Encoding.windowsCP1252.rawValue, appKit: nil,
-                                  reason: "The xattr's encoding does not fit the bytes: AppKit refuses to open; QuickEdit skips the xattr."),
-    ]
+    /// pinned, so a change on either side fails this test. Empty since vote
+    /// V2 (docs/decisions.md): "Automatic" reads exactly as AppKit does.
+    private static let exceptions: [String: Exception] = [:]
 
     private func save(_ document: TextDocument, to url: URL, _ op: NSDocument.SaveOperationType) async -> Error? {
         await withCheckedContinuation { continuation in
@@ -77,36 +67,73 @@ final class EncodingTests: XCTestCase {
         }
     }
 
-    /// The done-test: every fixture's guess equals AppKit's (or is a listed
-    /// exception), and open -> save gives the same bytes.
+    /// The done-test: every fixture's result equals AppKit's (or is a listed
+    /// exception): the same encoding, or, when AppKit refuses the file, the
+    /// same refusal. Every file that opens gives the same bytes on open -> save.
     func testEveryFixtureMatchesTheOracleAndRoundTrips() async throws {
         let fixtures = try EncodingFixtures.write(to: folder.appendingPathComponent("fixtures"))
-        let suggested = EncodingManager.defaultEncodings()
         var rows: [String] = []
-        var matches = 0, listed = 0, roundTrips = 0, documentRoundTrips = 0
+        var matches = 0, listed = 0, refused = 0, roundTrips = 0, documentRoundTrips = 0
         for (fixture, url) in fixtures {
             let name = fixture.name
             let bytes = try Data(contentsOf: url)
             let appKit = oracle(url)
-            let decoded = try PlainTextIO.decode(bytes, url: url, suggested: suggested)
-            let ours = comparable(decoded.format)
-            XCTAssertFalse(decoded.lossy, "\(name) loaded lossily")
+            let appKitEncoding = try? appKit.get()
+            let decoded: DecodedText?
+            var decodeError: Swift.Error?
+            do { decoded = try PlainTextIO.decode(bytes, url: url) } catch { decoded = nil; decodeError = error }
+            let ours = decoded.map { comparable($0.format) }
+
             if let exception = Self.exceptions[name] {
-                XCTAssertEqual(ours, exception.quickEdit, "\(name): QuickEdit's guess changed")
-                XCTAssertEqual(appKit, exception.appKit, "\(name): AppKit's answer changed")
+                XCTAssertEqual(ours, exception.quickEdit, "\(name): QuickEdit's answer changed")
+                XCTAssertEqual(appKitEncoding, exception.appKit, "\(name): AppKit's answer changed")
                 listed += 1
             } else {
-                XCTAssertEqual(ours, appKit, "\(name): QuickEdit \(ours), AppKit \(String(describing: appKit))")
-                if ours == appKit { matches += 1 }
+                XCTAssertEqual(ours, appKitEncoding,
+                               "\(name): QuickEdit \(ours.map(String.init) ?? "refuses (\(String(describing: decodeError)))"), "
+                               + "AppKit \(appKitEncoding.map(String.init) ?? "refuses")")
+                if ours == appKitEncoding { matches += 1 }
             }
+
+            // AppKit refuses: QuickEdit refuses the same way, through the document too.
+            if case .failure(let appKitError) = appKit {
+                refused += 1
+                let appKitEncodingNumber = (appKitError.userInfo[NSStringEncodingErrorKey] as? NSNumber)?.uintValue
+                if let appKitEncodingNumber {
+                    XCTAssertEqual(decodeError as? PlainTextIO.Error,
+                                   .inapplicableEncoding(String.Encoding(rawValue: appKitEncodingNumber)),
+                                   "\(name): PlainTextIO's refusal")
+                }
+                XCTAssertThrowsError(try TextDocument(contentsOf: url, ofType: TextDocument.plainTextType),
+                                     "\(name): the document opened a file AppKit refuses") { error in
+                    let error = error as NSError
+                    XCTAssertEqual(error.domain, appKitError.domain, name)
+                    XCTAssertEqual(error.code, appKitError.code, name)
+                    XCTAssertEqual((error.userInfo[NSStringEncodingErrorKey] as? NSNumber)?.uintValue, appKitEncodingNumber, name)
+                    XCTAssertEqual(error.localizedDescription, appKitError.localizedDescription, name)
+                }
+                rows.append([name, "refuses (\(appKitError.code), \(appKitEncodingNumber.map(String.init) ?? "-"))",
+                             decoded == nil ? "refuses" : "\(ours!)", ours == appKitEncoding ? "yes" : "NO",
+                             "n/a (refused)"].joined(separator: " | "))
+                continue
+            }
+
+            guard let decoded else {
+                XCTFail("\(name): QuickEdit refused a file AppKit opens: \(String(describing: decodeError))")
+                rows.append([name, "\(appKitEncoding!)", "refuses", "NO", "NO"].joined(separator: " | "))
+                continue
+            }
+            XCTAssertFalse(decoded.lossy, "\(name) loaded lossily")
 
             // Byte round trip through PlainTextIO.
             let encoded = try PlainTextIO.encode(decoded.text, as: decoded.format)
             XCTAssertEqual(encoded, bytes, "\(name): PlainTextIO round trip changed the bytes")
             if encoded == bytes { roundTrips += 1 }
 
-            // And through the document: open the file, save a copy.
+            // And through the document: open the file (the app's own decode
+            // call), check its encoding, save a copy.
             let document = try TextDocument(contentsOf: url, ofType: TextDocument.plainTextType)
+            XCTAssertEqual(comparable(document.format), appKitEncoding, "\(name): the document's encoding")
             let out = folder.appendingPathComponent("saved-\(name).txt")
             let error = await save(document, to: out, .saveToOperation)
             XCTAssertNil(error, "\(name): save failed")
@@ -117,19 +144,23 @@ final class EncodingTests: XCTestCase {
                            "\(name): the saved file's com.apple.TextEncoding")
             document.close()
 
-            rows.append([name, appKit.map { "\($0) \(String.localizedName(of: .init(rawValue: $0)))" } ?? "refuses",
-                         "\(ours) \(String.localizedName(of: decoded.format.encoding))",
-                         Self.exceptions[name] == nil ? "yes" : "no (listed)",
+            rows.append([name, appKitEncoding.map { "\($0) \(String.localizedName(of: .init(rawValue: $0)))" } ?? "-",
+                         "\(ours!) \(String.localizedName(of: decoded.format.encoding))",
+                         Self.exceptions[name] == nil ? (ours == appKitEncoding ? "yes" : "NO") : "no (listed)",
                          saved == bytes && encoded == bytes ? "yes" : "NO"].joined(separator: " | "))
         }
         print("ENCODING ORACLE TABLE: fixture | AppKit | QuickEdit | match | round trip bytes equal")
         for row in rows { print("ENCODING ORACLE ROW: \(row)") }
         print("ENCODING FIXTURES: \(fixtures.count) fixtures, \(matches) match AppKit, \(listed) listed exceptions, "
-              + "\(roundTrips) PlainTextIO round trips equal, \(documentRoundTrips) document save round trips equal")
+              + "\(refused) refused by AppKit, \(roundTrips) PlainTextIO round trips equal, "
+              + "\(documentRoundTrips) document save round trips equal")
         XCTAssertGreaterThanOrEqual(fixtures.count, 30)
         XCTAssertEqual(matches + listed, fixtures.count)
-        XCTAssertEqual(roundTrips, fixtures.count)
-        XCTAssertEqual(documentRoundTrips, fixtures.count)
+        // The two stale-xattr fixtures are the only files AppKit refuses;
+        // every other fixture opens and round-trips byte for byte.
+        XCTAssertEqual(refused, 2)
+        XCTAssertEqual(roundTrips, fixtures.count - refused)
+        XCTAssertEqual(documentRoundTrips, fixtures.count - refused)
     }
 
     // MARK: Encoding matches AppKit's writer
@@ -188,12 +219,43 @@ final class EncodingTests: XCTestCase {
     }
 
     func testFallbackFailureDecodesLossily() throws {
-        // Not UTF-8, no guess, and the fallback (ASCII here) cannot hold 0x81.
-        let decoded = try PlainTextIO.decode(Data(EncodingFixtures.invalidEverywhere),
-                                             suggested: EncodingManager.defaultEncodings(), fallback: .ascii)
+        // Not UTF-8, and the fallback (ASCII here) cannot hold 0x81.
+        let decoded = try PlainTextIO.decode(Data(EncodingFixtures.invalidEverywhere), fallback: .ascii)
         XCTAssertTrue(decoded.lossy)
         XCTAssertEqual(decoded.format.encoding, .utf8)
         XCTAssertTrue(decoded.text.contains("\u{FFFD}"))
+    }
+
+    /// Vote V2: a stale xattr refuses the file (as AppKit does) instead of
+    /// moving on to the BOM, UTF-8 or fallback steps.
+    func testStaleAttributeRefusesTheFile() throws {
+        let url = folder.appendingPathComponent("stale.txt")
+        let bytes = Data([0x63, 0x61, 0x66, 0xE9, 0x0A]) // "café" in Windows-1252, not UTF-8
+        try bytes.write(to: url)
+        try PlainTextIO.writeAttribute(for: .utf8, to: url)
+        XCTAssertThrowsError(try PlainTextIO.decode(bytes, url: url)) { error in
+            XCTAssertEqual(error as? PlainTextIO.Error, .inapplicableEncoding(.utf8))
+        }
+        // An explicit choice still wins over the xattr.
+        XCTAssertEqual(try PlainTextIO.decode(bytes, url: url, preferred: .windowsCP1252).format.encoding, .windowsCP1252)
+    }
+
+    /// Vote V2: no guess. Bytes that are not UTF-8 and have no BOM or xattr
+    /// are read with the fallback, which is the system's C-string encoding.
+    func testNonUTF8BytesUseTheSystemEncodingWithNoGuess() throws {
+        let system = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringGetSystemEncoding()))
+        XCTAssertEqual(String.defaultCStringEncoding, system)
+        let shiftJIS = Data("日本語のテキストです。\n".data(using: .shiftJIS)!)
+        let decoded = try PlainTextIO.decode(shiftJIS)
+        XCTAssertEqual(decoded.format.encoding, system)
+        XCTAssertFalse(decoded.lossy)
+        XCTAssertEqual(try PlainTextIO.encode(decoded.text, as: decoded.format), shiftJIS)
+        // A UTF-8 BOM over bytes that are not UTF-8 also ends at the fallback, BOM and all.
+        let badBody = Data([0xEF, 0xBB, 0xBF, 0x61, 0xFF, 0x0A])
+        let fallback = try PlainTextIO.decode(badBody, fallback: .macOSRoman)
+        XCTAssertEqual(fallback.format.encoding, .macOSRoman)
+        XCTAssertEqual(fallback.text, String(data: badBody, encoding: .macOSRoman))
+        XCTAssertEqual(try PlainTextIO.encode(fallback.text, as: fallback.format), badBody)
     }
 
     func testAttributeIsReadByNumberThenByName() throws {

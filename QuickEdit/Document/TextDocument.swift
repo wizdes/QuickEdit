@@ -152,7 +152,7 @@ final class TextDocument: NSDocument {
         try load(decode(data, url: nil, preferred: Self.defaultOpenEncoding()))
     }
 
-    /// PlainTextIO.decode with the app's encodings list, as an NSError
+    /// PlainTextIO.decode with AppKit's fallback encoding, as an NSError
     /// AppKit can show ("…couldn't be opened using text encoding X.").
     nonisolated func decode(_ data: Data, url: URL?, preferred: String.Encoding?) throws -> DecodedText {
         var fallback = String.defaultCStringEncoding
@@ -160,8 +160,7 @@ final class TextDocument: NSDocument {
         if let hook = Self.testHooks.withLock({ $0.fallbackEncoding }) { fallback = hook }
         #endif
         do {
-            return try PlainTextIO.decode(data, url: url, preferred: preferred,
-                                          suggested: EncodingManager.enabledEncodings(), fallback: fallback)
+            return try PlainTextIO.decode(data, url: url, preferred: preferred, fallback: fallback)
         } catch PlainTextIO.Error.inapplicableEncoding(let encoding) {
             var info: [String: Any] = [NSStringEncodingErrorKey: encoding.rawValue]
             if let url { info[NSURLErrorKey] = url }

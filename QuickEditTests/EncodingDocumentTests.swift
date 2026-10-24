@@ -47,6 +47,15 @@ final class EncodingDocumentTests: XCTestCase {
         return url
     }
 
+    /// "café" in Windows-1252 with the xattr TextEdit writes for it. Without
+    /// the xattr, "Automatic" reads these bytes as Mac Roman, as AppKit does
+    /// (vote V2 in docs/decisions.md).
+    private func latinFile(_ name: String) throws -> URL {
+        let url = try file(name, [0x63, 0x61, 0x66, 0xE9])
+        try PlainTextIO.writeAttribute(for: .windowsCP1252, to: url)
+        return url
+    }
+
     private func open(_ url: URL, window: Bool = true) throws -> TextDocument {
         let document = try TextDocument(contentsOf: url, ofType: TextDocument.plainTextType)
         if window { document.makeWindowControllers() }
@@ -217,7 +226,7 @@ final class EncodingDocumentTests: XCTestCase {
     }
 
     func testSavePanelStartsAtUTF8WhenTheTextNoLongerFits() throws {
-        let url = try file("latin.txt", [0x63, 0x61, 0x66, 0xE9]) // "café" in Windows-1252
+        let url = try latinFile("latin.txt")
         let document = try open(url, window: false)
         XCTAssertEqual(document.format.encoding, .windowsCP1252)
         XCTAssertEqual(document.initialSaveEncoding(), .windowsCP1252)
@@ -365,7 +374,7 @@ final class EncodingDocumentTests: XCTestCase {
     }
 
     private func latinDocument(_ presenter: FakePresenter) throws -> (TextDocument, NSTextView) {
-        let document = try open(try file("latin-\(UUID().uuidString).txt", [0x63, 0x61, 0x66, 0xE9])) // "café"
+        let document = try open(try latinFile("latin-\(UUID().uuidString).txt"))
         XCTAssertEqual(document.format.encoding, .windowsCP1252)
         document.alertPresenter = presenter
         let textView = try textView(of: document)

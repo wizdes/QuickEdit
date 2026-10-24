@@ -71,24 +71,31 @@ enum PlainTextIO {
 
     // MARK: Decoding
 
-    /// Turns file bytes into text (docs/plans/M3.md n1 step 1).
+    /// Turns file bytes into text the way AppKit's plain-text reader does
+    /// (vote V2 in docs/decisions.md: "Automatic" matches system TextEdit).
     /// - `preferred`: an explicit choice (Open panel, `PlainTextEncoding`
     ///   default). It wins; bytes that do not fit throw `inapplicableEncoding`.
-    /// - Else, in order: the `com.apple.TextEncoding` xattr of `url`, a BOM,
-    ///   strict UTF-8, NSString's guess with `suggested` encodings, then
-    ///   `fallback` (AppKit's own last step: the system's default C-string
-    ///   encoding, Mac Roman on an English Mac). A step whose encoding does
-    ///   not fit the bytes is skipped.
-    /// - Only if even `fallback` fails is the text decoded lossily (UTF-8
-    ///   with replacement characters) and marked `lossy`.
+    /// - Else, in order:
+    ///   1. the `com.apple.TextEncoding` xattr of `url`. Bytes that do not fit
+    ///      it throw `inapplicableEncoding`, as AppKit refuses such a file;
+    ///      there is no next step.
+    ///   2. a BOM (UTF-32, UTF-16, UTF-8). A BOM whose body does not decode
+    ///      is skipped (AppKit then reads the file as Mac Roman, BOM and all).
+    ///   3. strict UTF-8.
+    ///   4. `fallback`: AppKit's last step, the system's default C-string
+    ///      encoding (`String.defaultCStringEncoding`, Mac Roman on this Mac).
+    ///   There is no guess: AppKit never guesses.
+    /// - Only if `fallback` cannot hold the bytes (never for Mac Roman, which
+    ///   maps all 256 byte values) is the text decoded lossily (UTF-8 with
+    ///   replacement characters) and marked `lossy`.
     static func decode(_ data: Data, url: URL? = nil, preferred: String.Encoding? = nil,
-                       suggested: [String.Encoding] = [],
                        fallback: String.Encoding = String.defaultCStringEncoding) throws -> DecodedText {
         if let preferred {
             guard let decoded = decode(data, as: preferred) else { throw Error.inapplicableEncoding(preferred) }
             return decoded
         }
-        if let url, let named = encodingNamedByAttribute(of: url), let decoded = decode(data, as: named) {
+        if let url, let named = encodingNamedByAttribute(of: url) {
+            guard let decoded = decode(data, as: named) else { throw Error.inapplicableEncoding(named) }
             return decoded
         }
         if let decoded = decodeByBOM(data) { return decoded }
@@ -96,7 +103,6 @@ enum PlainTextIO {
             return DecodedText(text: text, format: .init(encoding: .utf8, hasBOM: false,
                                                          lineEnding: mostCommonLineEnding(in: data)))
         }
-        if let decoded = guess(data, suggested: suggested) { return decoded }
         if let decoded = decode(data, as: fallback) { return decoded }
         let text = String(decoding: data, as: UTF8.self)
         return DecodedText(text: text, format: .init(encoding: .utf8, hasBOM: false,
@@ -158,27 +164,6 @@ enum PlainTextIO {
         if data.starts(with: utf16LEBOM) || data.starts(with: utf16BEBOM) { return decode(data, as: .utf16) }
         if data.starts(with: utf8BOM) { return decode(data, as: .utf8) }
         return nil
-    }
-
-    /// NSString's encoding guess. Taken only when it returns a string and that
-    /// string encodes back to the very same bytes, so saving an unchanged file
-    /// never changes it.
-    private static func guess(_ data: Data, suggested: [String.Encoding]) -> DecodedText? {
-        var converted: NSString?
-        var usedLossy: ObjCBool = false
-        var options: [StringEncodingDetectionOptionsKey: Any] = [.allowLossyKey: false]
-        if !suggested.isEmpty { options[.suggestedEncodingsKey] = suggested.map { NSNumber(value: $0.rawValue) } }
-        let raw = NSString.stringEncoding(for: data, encodingOptions: options,
-                                          convertedString: &converted, usedLossyConversion: &usedLossy)
-        // It can return an encoding with no string (seen: 4 for EUC-JP bytes);
-        // no string means no guess.
-        guard raw != 0, let converted, !usedLossy.boolValue else { return nil }
-        let encoding = String.Encoding(rawValue: raw)
-        let decoded = DecodedText(text: converted as String,
-                                  format: .init(encoding: encoding, hasBOM: false,
-                                                lineEnding: mostCommonLineEnding(in: data)))
-        guard let back = try? encode(decoded.text, as: decoded.format), back == data else { return nil }
-        return decoded
     }
 
     // MARK: Encoding

@@ -30,6 +30,12 @@ enum MainMenu {
         let menu = NSMenu(title: appName)
         menu.addItem(item("About \(appName)", #selector(NSApplication.orderFrontStandardAboutPanel(_:))))
         menu.addItem(.separator())
+        // TextEdit's "Preferences…" under its modern name (codemap section 2).
+        // The controller is a plain object; its window is built on first use.
+        let settings = item("Settings\u{2026}", #selector(NSWindowController.showWindow(_:)), ",")
+        settings.target = SettingsWindowController.shared
+        menu.addItem(settings)
+        menu.addItem(.separator())
         let services = NSMenu(title: "Services")
         let servicesItem = submenuItem(services)
         menu.addItem(servicesItem)

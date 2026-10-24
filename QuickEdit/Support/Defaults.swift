@@ -63,6 +63,17 @@ enum Defaults {
         ]
     }
 
+    /// Settings > "Restore All Defaults" (reference/apple/Preferences.m:182-199):
+    /// every registered key goes back to its registered value, and the plain
+    /// font goes back to the system's fixed-pitch font. `Encodings` has no
+    /// registered value, so the encodings list stays, as in TextEdit.
+    @MainActor
+    static func restoreAll() {
+        let defaults = UserDefaults.standard
+        for key in registeredValues().keys { defaults.removeObject(forKey: key) }
+        NSFont.setUserFixedPitch(nil)
+    }
+
     static func bool(_ key: DefaultsKey) -> Bool { UserDefaults.standard.bool(forKey: key.rawValue) }
     static func integer(_ key: DefaultsKey) -> Int { UserDefaults.standard.integer(forKey: key.rawValue) }
 }
