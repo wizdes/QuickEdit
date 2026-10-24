@@ -211,6 +211,17 @@ final class DocumentLifeTests: XCTestCase {
         (0..<20_000).map { "line \($0) of the restoration fixture\n" }.joined()
     }
 
+    /// The first character on screen in `textView`.
+    private func firstVisibleCharacter(_ textView: NSTextView) throws -> Int {
+        let layoutManager = try XCTUnwrap(textView.layoutManager)
+        let container = try XCTUnwrap(textView.textContainer)
+        var rect = textView.visibleRect
+        rect.origin.y -= textView.textContainerOrigin.y
+        rect.size.height = 1
+        let glyphs = layoutManager.glyphRange(forBoundingRect: rect, in: container)
+        return layoutManager.characterIndexForGlyph(at: glyphs.location)
+    }
+
     func testSelectionAndScrollAreRestored() async throws {
         let text = bigText()
         let url = try file("restore.txt", text)
@@ -219,6 +230,7 @@ final class DocumentLifeTests: XCTestCase {
         let middle = (text as NSString).range(of: "line 10000 of")
         first.textView.setSelectedRange(middle)
         first.textView.scrollRangeToVisible(middle)
+        let savedTop = try firstVisibleCharacter(first.textView)
         let state = try archive(first)
 
         // A fresh window on the same document, as after relaunch.
@@ -226,15 +238,14 @@ final class DocumentLifeTests: XCTestCase {
         XCTAssertEqual(second.textView.selectedRange(), NSRange(location: 0, length: 0))
         second.restoreState(with: state)
         XCTAssertEqual(second.textView.selectedRange(), middle, "the selection comes back")
+        second.showWindow(nil)
         let scrolled = try await waitFor(2) { second.textView.visibleRect.minY > 1000 }
         XCTAssertTrue(scrolled, "the window scrolls back to the saved place: \(second.textView.visibleRect)")
-        if let layoutManager = second.textView.layoutManager, let container = second.textView.textContainer {
-            let glyphs = layoutManager.glyphRange(forBoundingRectWithoutAdditionalLayout: second.textView.visibleRect,
-                                                  in: container)
-            let shown = layoutManager.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
-            XCTAssertTrue(NSLocationInRange(middle.location, shown) || shown.location <= middle.location,
-                          "the saved place is on screen: shown \(shown), saved \(middle)")
-        }
+        // The same first line on screen as when the state was saved (one line of slack).
+        let lineLength = ("line 10000 of the restoration fixture\n" as NSString).length
+        let restoredTop = try firstVisibleCharacter(second.textView)
+        XCTAssertLessThanOrEqual(abs(restoredTop - savedTop), lineLength,
+                                 "first visible character \(restoredTop), saved \(savedTop)")
         second.close()
     }
 

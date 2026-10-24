@@ -59,9 +59,40 @@ final class DocumentLifeTests: QuickEditUITestCase {
         waitUntil(10, "the window did not close") { self.app.windows.count == 0 }
     }
 
-    /// Rename… then Move To… then Duplicate on a named file: files end where
-    /// expected with the same bytes.
-    func testRenameMoveToAndDuplicate() throws {
+    /// File > Revert To > Last Saved: the typed edit goes away, the window
+    /// shows the saved text, and the file holds the saved bytes.
+    func testRevertToLastSaved() throws {
+        let url = try fixtureFolder("revert").appendingPathComponent("revert.txt")
+        let saved = Array("saved text\n".utf8)
+        launch(opening: url.path)
+        XCTAssertTrue(textView.waitForExistence(timeout: 10))
+        app.typeKey(.downArrow, modifierFlags: .command)
+        app.typeText("junk")
+        XCTAssertEqual(text, "saved text\njunk")
+
+        // With autosave in place, AppKit makes "Revert To" a submenu; its
+        // first item names the last saved (or opened) version.
+        app.menuBars.menuBarItems["File"].click()
+        let revertTo = app.menuBars.menuBarItems["File"].menuItems["Revert To"]
+        XCTAssertTrue(revertTo.waitForExistence(timeout: 5), "no Revert To submenu")
+        revertTo.hover()
+        let last = revertTo.menuItems.matching(NSPredicate(format: "title BEGINSWITH 'Last'")).firstMatch
+        XCTAssertTrue(last.waitForExistence(timeout: 5),
+                      "items: \(revertTo.menuItems.allElementsBoundByIndex.map(\.title))")
+        last.click()
+        // AppKit may confirm first.
+        let sheet = app.sheets.firstMatch
+        if sheet.waitForExistence(timeout: 2), sheet.buttons["Revert"].exists {
+            attachScreenshot("revert-confirm", app.windows.firstMatch.screenshot())
+            sheet.buttons["Revert"].click()
+        }
+        waitUntil(10, "the window shows \(text.debugDescription)") { self.text == "saved text\n" }
+        waitForBytes(url, saved)
+    }
+
+    /// Duplicate, then Rename…, then Move To… on a named file (the File menu
+    /// order): files end where expected with the same bytes.
+    func testDuplicateRenameAndMoveTo() throws {
         let folder = try fixtureFolder("rename-move")
         let original = folder.appendingPathComponent("original.txt")
         let renamed = folder.appendingPathComponent("renamed.txt")
@@ -70,6 +101,17 @@ final class DocumentLifeTests: QuickEditUITestCase {
         let content = Array("move me\n".utf8)
         launch(opening: original.path)
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
+
+        // Duplicate: an untitled copy with the same text, saved next to it,
+        // then closed so the original's window is in front again.
+        app.typeKey("s", modifierFlags: [.command, .shift])
+        waitUntil(10, "no duplicate window") { self.app.windows.count == 2 }
+        app.typeKey("s", modifierFlags: .command)
+        fillSavePanel(name: "copy", folder: folder)
+        waitForBytes(folder.appendingPathComponent("copy.txt"), content)
+        app.typeKey("w", modifierFlags: .command)
+        waitUntil(10, "the duplicate window did not close") { self.app.windows.count == 1 }
+        XCTAssertEqual(bytes(original), content, "Duplicate leaves the original unchanged")
 
         // Rename…: the title becomes an editable field.
         chooseMenu("File", "Rename\u{2026}")
@@ -93,13 +135,6 @@ final class DocumentLifeTests: QuickEditUITestCase {
         app.typeKey(.return, modifierFlags: [])
         if popover.exists { popover.buttons["Move"].firstMatch.click() }
         waitUntil(10, "move did not happen") { self.bytes(moved) == content && self.bytes(renamed) == nil }
-
-        // Duplicate: an untitled copy with the same text, saved next to it.
-        app.typeKey("s", modifierFlags: [.command, .shift])
-        waitUntil(10, "no duplicate window") { self.app.windows.count == 2 }
-        app.typeKey("s", modifierFlags: .command)
-        fillSavePanel(name: "copy", folder: dest)
-        waitForBytes(dest.appendingPathComponent("copy.txt"), content)
-        XCTAssertEqual(bytes(moved), content, "the original is unchanged")
+        XCTAssertEqual(bytes(folder.appendingPathComponent("copy.txt")), content, "the copy is unchanged")
     }
 }

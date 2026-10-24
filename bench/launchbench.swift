@@ -124,7 +124,20 @@ struct RunResult {
 /// The process the last oneRun launched, so only it gets quit.
 var lastLaunchedPID: Int32 = -1
 
+/// Stops the bench if a copy of the target runs that this harness did not
+/// launch (M2 review row 2): openApplication would reuse it, and the quit
+/// after the run would close the user's app.
+func refuseForeignCopies(_ t: Target) {
+    let foreign = t.running().map(\.processIdentifier)
+    guard !foreign.isEmpty else { return }
+    eprint("FAILED: \(t.label) (\(t.bid)) is running as pid(s) "
+           + foreign.map(String.init).joined(separator: ", ")
+           + ", not launched by the bench. It was left running; quit it, then run the bench again.")
+    exit(1)
+}
+
 func oneRun(_ t: Target) -> RunResult? {
+    refuseForeignCopies(t)
     let cfg = NSWorkspace.OpenConfiguration()
     cfg.activates = true
     cfg.addsToRecentItems = false
@@ -150,9 +163,8 @@ func oneRun(_ t: Target) -> RunResult? {
     var t1: UInt64 = 0, pid: Int32 = -1
     let deadline = t0 &+ UInt64(timeoutS * 1e9)
     poll: while nowNs() < deadline {
-        if pid < 0 {
-            if lpid > 0 { pid = lpid } else if let a = t.running().first { pid = a.processIdentifier }
-        }
+        // Only the process this call launched counts; never adopt another copy.
+        if pid < 0 && lpid > 0 { pid = lpid }
         if pid > 0 {
             for w in windowRows() {
                 guard (w[kCGWindowOwnerPID as String] as? Int).map({ Int32($0) }) == pid,

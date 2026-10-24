@@ -2,7 +2,7 @@ import AppKit
 
 /// One window per document: a scroll view around one TextKit 1 text view on
 /// the document's storage (contract `win-text`).
-final class DocumentWindowController: NSWindowController, NSWindowDelegate {
+final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTextViewDelegate {
     let textView: NSTextView
 
     init(document: TextDocument) {
@@ -32,6 +32,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
+        textView.delegate = self
         window.center()
         // NSWindowController cascades only windows it loads from a nib, so
         // cascade by hand: step down and right from the front document window.
@@ -39,6 +40,16 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate {
             $0 !== window && $0.isVisible && $0.windowController is DocumentWindowController
         }) {
             window.cascadeTopLeft(from: front.cascadeTopLeft(from: .zero))
+        } else {
+            #if DEBUG
+            // UI tests only: `-QETestUntitledTopLeft "{x, y}"` places the first
+            // untitled window away from the center while it is made, before
+            // it becomes transient, so a test can tell a copied frame from a
+            // default one. Moving it later would end the transient state.
+            if document.fileURL == nil, let point = UserDefaults.standard.string(forKey: "QETestUntitledTopLeft") {
+                window.setFrameTopLeftPoint(NSPointFromString(point))
+            }
+            #endif
         }
         updateEditable(for: document)
         // Save the new selection and scroll place at the next state save.
@@ -94,13 +105,83 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate {
         let top = coder.containsValue(forKey: RestoreKey.topCharacter)
             ? min(max(0, coder.decodeInteger(forKey: RestoreKey.topCharacter)), length) : location
         // Scroll after this turn of the run loop, once the window has laid
-        // out its visible part. scrollRangeToVisible lays out only up to the
-        // target with non-contiguous layout, never the whole document.
+        // out its visible part.
         DispatchQueue.main.async { [weak self] in
-            MainActor.assumeIsolated {
-                guard let textView = self?.textView, top <= (textView.textStorage?.length ?? 0) else { return }
-                textView.scrollRangeToVisible(NSRange(location: top, length: 0))
-            }
+            MainActor.assumeIsolated { self?.scrollLineToTop(containing: top) }
+        }
+    }
+
+    /// The selection and the first character on screen, so a reload can put
+    /// them back (M2 review row 3).
+    struct Place {
+        var selection: NSRange
+        var topCharacter: Int
+    }
+
+    func currentPlace() -> Place {
+        var top = textView.selectedRange().location
+        if let layoutManager = textView.layoutManager, let container = textView.textContainer {
+            let glyphs = layoutManager.glyphRange(forBoundingRectWithoutAdditionalLayout: textView.visibleRect, in: container)
+            top = layoutManager.characterIndexForGlyph(at: glyphs.location)
+        }
+        return Place(selection: textView.selectedRange(), topCharacter: top)
+    }
+
+    /// Puts a saved place back, clamped to the text's new length.
+    func restore(_ place: Place) {
+        let length = textView.textStorage?.length ?? 0
+        let location = min(place.selection.location, length)
+        textView.setSelectedRange(NSRange(location: location, length: min(place.selection.length, length - location)))
+        scrollLineToTop(containing: min(place.topCharacter, length))
+    }
+
+    /// Scrolls so the line holding `character` is the top line on screen.
+    /// With non-contiguous layout, asking for that one line fragment lays out
+    /// only around it, never the whole document.
+    private func scrollLineToTop(containing character: Int) {
+        let length = textView.textStorage?.length ?? 0
+        guard let layoutManager = textView.layoutManager, length > 0, character <= length else { return }
+        let glyph = layoutManager.glyphIndexForCharacter(at: min(character, length - 1))
+        let line = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        textView.scroll(NSPoint(x: 0, y: line.minY + textView.textContainerOrigin.y))
+    }
+
+    // MARK: Line endings and the encoding check (M3 n3)
+
+    /// Set when an edit inserts a character the document's encoding cannot
+    /// hold; the question is asked once the edit is in the storage.
+    private var encodingCheckPending = false
+
+    /// Return and Enter type the document's main line ending (LF for new
+    /// documents), so a CRLF or CR file stays that way. Better than TextEdit,
+    /// which always types LF (docs/codemap.md 4.3). Paste is untouched.
+    func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard commandSelector == #selector(NSResponder.insertNewline(_:)),
+              let document = document as? TextDocument else { return false }
+        let ending = document.format.lineEnding
+        guard ending != .lf else { return false }
+        textView.insertText(ending.string, replacementRange: textView.selectedRange())
+        return true
+    }
+
+    /// Checks only the inserted characters, never the whole text. The
+    /// failing edit gets its own undo step, so Cancel takes back just it.
+    func textView(_ textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange,
+                  replacementString: String?) -> Bool {
+        if let replacementString, let document = document as? TextDocument,
+           document.insertionDoesNotFit(replacementString) {
+            textView.breakUndoCoalescing()
+            encodingCheckPending = true
+        }
+        return true
+    }
+
+    func textDidChange(_ notification: Notification) {
+        guard encodingCheckPending else { return }
+        encodingCheckPending = false
+        guard let document = document as? TextDocument else { return }
+        document.encodingNoLongerFits { [weak self] in
+            self?.textView.undoManager?.undo()
         }
     }
 

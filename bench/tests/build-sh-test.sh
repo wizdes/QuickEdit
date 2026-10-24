@@ -43,5 +43,24 @@ else
 fi
 [ ! -e "$ROOT/builds/QuickEdit-M99.zip" ] || fail "a zip was made"
 
+# 3. `unit` and `test` run the shell tests (M2 review row 7) and fail when one
+#    fails, before any Xcode work. QE_SHELL_TESTS_DIR points them at a folder
+#    with one failing test; a fake xcodebuild records whether Xcode ran.
+mkdir -p "$WORK/shell-fail" "$WORK/xc-bin"
+printf '#!/bin/bash\necho "deliberate failure"\nexit 3\n' >"$WORK/shell-fail/always-fails.sh"
+chmod +x "$WORK/shell-fail/always-fails.sh"
+printf '#!/bin/bash\ntouch "%s/xcodebuild-ran"\nexit 1\n' "$WORK" >"$WORK/xc-bin/xcodebuild"
+chmod +x "$WORK/xc-bin/xcodebuild"
+for cmd in unit test; do
+    rm -f "$WORK/xcodebuild-ran"
+    out="$(QE_SHELL_TESTS_DIR="$WORK/shell-fail" PATH="$WORK/xc-bin:$PATH" "$ROOT/build.sh" "$cmd" 2>&1)"; status=$?
+    if [ "$status" -ne 0 ] && grep -q "always-fails.sh" <<<"$out" && grep -q "SHELL TESTS: FAILED" <<<"$out" \
+        && [ ! -e "$WORK/xcodebuild-ran" ]; then
+        pass "./build.sh $cmd runs the shell tests and stops on a failure"
+    else
+        fail "./build.sh $cmd with a failing shell test (exit $status, xcodebuild ran: $([ -e "$WORK/xcodebuild-ran" ] && echo yes || echo no)): $(tail -2 <<<"$out")"
+    fi
+done
+
 echo "build-sh-test: $fails failure(s)"
 [ "$fails" -eq 0 ]

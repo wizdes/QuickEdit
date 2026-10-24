@@ -10,8 +10,9 @@ final class ExternalChangeTests: QuickEditUITestCase {
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
         XCTAssertEqual(text, "before\n")
         waitForBytes(url, Array("after\n".utf8), timeout: 10)
-        // macOS tells the app about ~3 s after an uncoordinated write.
-        waitUntil(10, "the window still shows \(text.debugDescription)") { self.text == "after\n" }
+        // macOS tells the app about 3.15 s after an uncoordinated write
+        // (measured 2026-10-23), so allow 5 s.
+        waitUntil(5, "the window still shows \(text.debugDescription)") { self.text == "after\n" }
     }
 
     func testEditedDocumentShowsConflictOnSave() throws {

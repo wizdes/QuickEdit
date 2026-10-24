@@ -1,0 +1,87 @@
+import XCTest
+
+/// M3 end to end: the Open and Save panel encoding pop-ups, the "can no
+/// longer be saved" sheet, and Return in a CRLF file. Fixtures come from
+/// build.sh (folder "encodings").
+final class EncodingPanelTests: QuickEditUITestCase {
+    private func choose(_ title: String, in popUp: XCUIElement) {
+        XCTAssertTrue(popUp.waitForExistence(timeout: 5), "no encoding pop-up")
+        popUp.click()
+        let item = popUp.menuItems[title]
+        XCTAssertTrue(item.waitForExistence(timeout: 5), "no item \(title)")
+        item.click()
+    }
+
+    /// The Open panel's choice decodes that file: UTF-8 bytes read as
+    /// Windows Latin 1 show "cafÃ©".
+    func testOpenPanelEncodingChoiceAppliesToTheFile() throws {
+        let url = try fixtureFolder("encodings").appendingPathComponent("utf8.txt")
+        launch()
+        XCTAssertTrue(textView.waitForExistence(timeout: 10))
+        app.typeKey("o", modifierFlags: .command)
+        let panel = app.sheets.firstMatch.waitForExistence(timeout: 5) ? app.sheets.firstMatch : app.dialogs.firstMatch
+        XCTAssertTrue(panel.exists, "no Open panel")
+        let popUp = panel.popUpButtons["openEncoding"]
+        XCTAssertEqual(popUp.value as? String, "Automatic", "the pop-up starts at Automatic")
+        attachScreenshot("open-panel-encoding", app.windows.firstMatch.screenshot())
+        choose("Western (Windows Latin 1)", in: popUp)
+        app.typeKey("g", modifierFlags: [.command, .shift])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        app.typeText(url.path)
+        app.typeKey(.return, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(1.0))
+        app.typeKey(.return, modifierFlags: [])
+        let window = app.windows.matching(NSPredicate(format: "title BEGINSWITH 'utf8'")).firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 10))
+        XCTAssertEqual(window.textViews.firstMatch.value as? String, "caf\u{C3}\u{A9}\n")
+    }
+
+    /// The Save panel's choice is what lands on disk.
+    func testSavePanelEncodingChangeWritesThatEncoding() throws {
+        let folder = try fixtureFolder("encodings")
+        launch()
+        XCTAssertTrue(textView.waitForExistence(timeout: 10))
+        app.typeText("caf\u{E9}")
+        app.typeKey("s", modifierFlags: .command)
+        let sheet = savePanel()
+        let popUp = sheet.popUpButtons["saveEncoding"]
+        XCTAssertEqual(popUp.value as? String, "Unicode (UTF-8)", "a new document starts at UTF-8")
+        attachScreenshot("save-panel-encoding", app.windows.firstMatch.screenshot())
+        choose("Western (Windows Latin 1)", in: popUp)
+        fillSavePanel(name: "latin-out.txt", folder: folder, addTxtExtension: true)
+        waitForBytes(folder.appendingPathComponent("latin-out.txt"), [0x63, 0x61, 0x66, 0xE9])
+    }
+
+    /// Typing a character Windows Latin 1 cannot hold shows TextEdit's
+    /// sheet; Cancel takes the character back.
+    func testEncodingNoLongerFitsSheetCancelUndoes() throws {
+        let url = try fixtureFolder("encodings").appendingPathComponent("latin.txt")
+        launch(opening: url.path)
+        XCTAssertTrue(textView.waitForExistence(timeout: 10))
+        XCTAssertEqual(text, "caf\u{E9}\n")
+        app.typeKey(.downArrow, modifierFlags: .command)
+        app.typeText("\u{3A9}") // Greek capital omega: not in Windows Latin 1
+        let sheet = app.sheets.firstMatch
+        XCTAssertTrue(sheet.waitForExistence(timeout: 5), "no encoding sheet")
+        let sheetText = sheet.staticTexts.allElementsBoundByIndex.compactMap { $0.value as? String }.joined(separator: " ")
+        XCTAssertTrue(sheetText.contains("can no longer be saved using its original Western (Windows Latin 1) encoding"),
+                      "sheet says: \(sheetText)")
+        attachScreenshot("encoding-sheet", app.windows.firstMatch.screenshot())
+        sheet.buttons["Cancel"].click()
+        waitUntil(5, "text is \(text.debugDescription)") { self.text == "caf\u{E9}\n" }
+        XCTAssertEqual(bytes(url), [0x63, 0x61, 0x66, 0xE9, 0x0A], "nothing written")
+    }
+
+    /// Return in a CRLF file types CRLF; the file stays CRLF only.
+    func testReturnInACRLFFileKeepsCRLF() throws {
+        let url = try fixtureFolder("encodings").appendingPathComponent("crlf.txt")
+        launch(opening: url.path)
+        XCTAssertTrue(textView.waitForExistence(timeout: 10))
+        app.typeKey(.downArrow, modifierFlags: .command)
+        app.typeText("x")
+        app.typeKey(.return, modifierFlags: [])
+        app.typeText("y")
+        app.typeKey("s", modifierFlags: .command)
+        waitForBytes(url, Array("one\r\ntwo\r\nx\r\ny".utf8))
+    }
+}

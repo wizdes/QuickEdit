@@ -48,6 +48,31 @@ fi
 kill "$before" 2>/dev/null; wait "$before" 2>/dev/null
 sleep 0.5
 
+# M2 review row 2: a copy of the target started between rounds is not
+# reused or quit; the bench stops with an error that names it.
+"$BIN" --runs 2 --warmups 0 --hold 0 --settle 3 --timeout 5 --arg Fake=--window Fake="$FAKE" \
+    >"$WORK/between.out" 2>&1 &
+bench=$!
+# Wait for the bench's own round-1 copy to appear and then go away.
+seen=""
+for _ in $(seq 1 200); do
+    if [ -n "$(fake_pids)" ]; then seen=yes; elif [ -n "$seen" ]; then break; fi
+    sleep 0.05
+done
+"$FAKE/Contents/MacOS/FakeBench" </dev/null >/dev/null 2>&1 &
+user=$!
+perl -e 'alarm 180; exec @ARGV' sh -c "while kill -0 $bench 2>/dev/null; do sleep 0.2; done"
+wait "$bench"; status=$?
+out="$(cat "$WORK/between.out")"
+if [ -n "$seen" ] && [ "$status" -ne 0 ] && grep -q "not launched by the bench" <<<"$out" && grep -q "$user" <<<"$out" \
+    && kill -0 "$user" 2>/dev/null; then
+    pass "a copy started between rounds stops the bench, named, and keeps running"
+else
+    fail "copy started between rounds (round-1 copy seen: ${seen:-no}, exit $status, pid $user alive: $(kill -0 "$user" 2>/dev/null && echo yes || echo no)): $(tail -3 <<<"$out")"
+fi
+kill "$user" 2>/dev/null; wait "$user" 2>/dev/null
+sleep 0.5
+
 # Row 10: no window ever appears -> missing samples -> non-zero exit.
 out="$(perl -e 'alarm 300; exec @ARGV' "$BIN" "${fast[@]}" --csv "$WORK/a.csv" Fake="$FAKE" 2>&1)"; status=$?
 if [ "$status" -ne 0 ] && grep -qi "missing\|below" <<<"$out"; then

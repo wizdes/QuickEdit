@@ -46,6 +46,34 @@
 			<key>NSDocumentClass</key>
 			<string>$(PRODUCT_MODULE_NAME).TextDocument</string>
 		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>public.text</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.text</string>
+			</array>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>NSDocumentClass</key>
+			<string>$(PRODUCT_MODULE_NAME).TextDocument</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Unknown document</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>NSDocumentClass</key>
+			<string>$(PRODUCT_MODULE_NAME).TextDocument</string>
+		</dict>
 	</array>
 </dict>
 </plist>

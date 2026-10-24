@@ -5,10 +5,14 @@ import XCTest
 final class TransientWindowTests: QuickEditUITestCase {
     func testOpenReplacesTheLaunchWindowInPlace() throws {
         let url = try fixtureFolder("transient").appendingPathComponent("replace.txt")
-        launch()
+        // The untitled window starts away from the center (a Debug launch
+        // argument places it as it is made; dragging it would end the
+        // transient state), so a matching frame proves it was copied.
+        launch(extraArguments: ["-QETestUntitledTopLeft", "{40, 700}"])
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
         XCTAssertEqual(app.windows.count, 1, "launch shows one untitled window")
         let untitledFrame = app.windows.firstMatch.frame
+        XCTAssertEqual(untitledFrame.minX, 40, accuracy: 1, "the untitled window was not moved: \(untitledFrame)")
 
         app.typeKey("o", modifierFlags: .command)
         XCTAssertTrue(app.sheets.firstMatch.waitForExistence(timeout: 5) || app.dialogs.firstMatch.waitForExistence(timeout: 5),

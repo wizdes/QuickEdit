@@ -1,8 +1,8 @@
 #!/bin/bash
 # QuickEdit's one entry point (Doc B section 4).
 #   ./build.sh                        Release build to build/Release/QuickEdit.app, signed
-#   ./build.sh test                   Debug build + unit and UI tests
-#   ./build.sh unit                   unit tests only (works with the screen locked)
+#   ./build.sh test                   shell tests (bench/tests/*.sh), Debug build + unit and UI tests
+#   ./build.sh unit                   shell tests, then unit tests only (works with the screen locked)
 #   ./build.sh only <T[/C[/m]]>...    just these tests, same checks (for reruns)
 #   ./build.sh dist M<n> [--skip-tests]
 #                                     full tests, then Release build, zip to builds/QuickEdit-M<n>.zip,
@@ -111,7 +111,7 @@ make_fixtures() {
     local name
     for name in open-type-save new-save boundary ext-on ext-off ext-md open-panel shots \
         transient external-clean external-edited locked close-named close-untitled \
-        rename-move rename-move/dest restore recent cascade; do
+        rename-move rename-move/dest restore recent cascade revert encodings; do
         mkdir -p "$dir/$name"
     done
     printf 'abc\n' >"$dir/open-type-save/hello.txt"
@@ -126,6 +126,12 @@ make_fixtures() {
     printf 'named\n' >"$dir/close-named/named.txt"
     printf 'move me\n' >"$dir/rename-move/original.txt"
     printf 'recent\n' >"$dir/recent/recent.txt"
+    printf 'saved text\n' >"$dir/revert/revert.txt"
+    # M3 encodings (QuickEditUITests/EncodingPanelTests.swift).
+    printf 'caf\303\251\n' >"$dir/encodings/utf8.txt"
+    printf 'caf\351\n' >"$dir/encodings/latin.txt"
+    xattr -w com.apple.TextEncoding 'windows-1252;1280' "$dir/encodings/latin.txt"
+    printf 'one\r\ntwo\r\n' >"$dir/encodings/crlf.txt"
     # About 1 MB of numbered lines; the restoration test selects line 13000.
     awk 'BEGIN { for (i = 0; i < 26000; i++) printf "line %d of the restoration fixture\n", i }' \
         >"$dir/restore/restore-1mb.txt"
@@ -217,12 +223,41 @@ for n in json.load(sys.stdin).get("testNodes", []):
     echo "TESTS ($label): PASS $passed of $total"
 }
 
+# Runs every bench/tests/*.sh (M2 review row 7) before any Xcode work; any
+# failure stops the command. QE_SHELL_TESTS_DIR overrides the folder (used by
+# bench/tests/build-sh-test.sh to check this function).
+run_shell_tests() {
+    local dir="${QE_SHELL_TESTS_DIR:-$ROOT/bench/tests}" script name status
+    local ran=0 failed=()
+    for script in "$dir"/*.sh; do
+        [ -e "$script" ] || continue
+        name="$(basename "$script")"
+        echo "shell test: $name"
+        status=0
+        perl -e 'alarm 900; exec @ARGV' "$script" </dev/null >"$BUILD/shell-test-$name.log" 2>&1 || status=$?
+        ran=$((ran + 1))
+        if [ "$status" -ne 0 ]; then
+            failed+=("$name")
+            tail -5 "$BUILD/shell-test-$name.log" >&2
+            echo "  (exit $status, log: $BUILD/shell-test-$name.log)" >&2
+        fi
+    done
+    [ "$ran" -gt 0 ] || die "no shell tests found in $dir"
+    if [ "${#failed[@]}" -gt 0 ]; then
+        echo "SHELL TESTS: FAILED: ${failed[*]}" >&2
+        die "${#failed[@]} of $ran shell test(s) failed"
+    fi
+    echo "SHELL TESTS: PASS $ran of $ran"
+}
+
 cmd="${1:-release}"
 case "$cmd" in
     release|"")
         release_build
         ;;
     test)
+        mkdir -p "$BUILD"
+        run_shell_tests
         if ui_tests_possible; then
             run_tests "" all
         else
@@ -231,6 +266,8 @@ case "$cmd" in
         fi
         ;;
     unit)
+        mkdir -p "$BUILD"
+        run_shell_tests
         run_tests "QuickEditTests" unit
         ;;
     uicheck)

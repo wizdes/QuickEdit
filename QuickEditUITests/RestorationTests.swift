@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 
 /// M2 n5: quit with windows kept, relaunch: the same file, selection and
@@ -21,21 +22,26 @@ final class RestorationTests: QuickEditUITestCase {
         app.typeKey("q", modifierFlags: .command)
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 15))
 
+        // The find pasteboard outlives the app; clear it so nothing but the
+        // restored selection can bring "line 13000 of" back.
+        NSPasteboard(name: .find).clearContents()
+
         // Relaunch with no file argument: restoration reopens the window.
         launch(keepsWindows: true)
         let window = app.windows.matching(NSPredicate(format: "title BEGINSWITH 'restore-1mb'")).firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 15), "titles: \(app.windows.allElementsBoundByIndex.map(\.title))")
         XCTAssertEqual(app.windows.count, 1)
-        // Read the selection back: Use Selection for Find (Cmd+E) puts it in
-        // the find field.
-        app.typeKey("e", modifierFlags: .command)
-        app.typeKey("f", modifierFlags: .command)
-        XCTAssertTrue(search.waitForExistence(timeout: 5))
-        XCTAssertEqual(search.value as? String, "line 13000 of", "the selection did not come back")
+        // Read the selection back through accessibility: typing replaces the
+        // selection, so the text view's value shows exactly what was selected.
+        app.typeText("§")
+        let value = (window.textViews.firstMatch.value as? String) ?? ""
+        XCTAssertTrue(value.contains("line 12999 of the restoration fixture\n§ the restoration fixture\nline 13001 of"),
+                      "the selection \"line 13000 of\" did not come back")
+        XCTAssertEqual(value.components(separatedBy: "§").count, 2, "exactly one replacement")
         attachScreenshot("restored-window", window.screenshot())
+        app.typeKey("z", modifierFlags: .command)
 
         // Leave no saved windows for later runs: close, then quit.
-        app.typeKey(.escape, modifierFlags: [])
         app.typeKey("w", modifierFlags: .command)
         app.typeKey("q", modifierFlags: .command)
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 15))
