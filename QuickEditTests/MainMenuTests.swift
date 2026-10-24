@@ -188,6 +188,100 @@ final class MainMenuTests: XCTestCase {
         ])
     }
 
+    // MARK: M4 n1: the Edit and Format menus
+
+    /// One row per item, nested items indented four spaces:
+    /// "Title|Key|action" plus "|tag N" for a nonzero tag. Keys read like
+    /// docs/codemap.md section 2 ("Shift+Cmd+Z", "Opt+Esc").
+    static func rows(_ menu: NSMenu, depth: Int = 0) -> [String] {
+        var out: [String] = []
+        let indent = String(repeating: "    ", count: depth)
+        for item in menu.items {
+            if item.isSeparatorItem { out.append(indent + "----"); continue }
+            var key = ""
+            if !item.keyEquivalent.isEmpty {
+                let m = item.keyEquivalentModifierMask.intersection(.deviceIndependentFlagsMask)
+                let name = item.keyEquivalent == "\u{1B}" ? "Esc" : item.keyEquivalent.uppercased()
+                key = (m.contains(.control) ? "Ctrl+" : "") + (m.contains(.option) ? "Opt+" : "")
+                    + (m.contains(.shift) ? "Shift+" : "") + (m.contains(.command) ? "Cmd+" : "") + name
+            }
+            let action = item.submenu != nil ? "submenu" : (item.action.map(NSStringFromSelector) ?? "")
+            out.append(indent + "\(item.title)|\(key)|\(action)" + (item.tag != 0 ? "|tag \(item.tag)" : ""))
+            if let submenu = item.submenu { out += rows(submenu, depth: depth + 1) }
+        }
+        return out
+    }
+
+    /// The whole Edit menu, in order, against docs/codemap.md section 2: every
+    /// KEEP row, Data Detectors (CHANGE row, kept after the test in
+    /// EditActionsTests), and the nib's separators once the DROP rows are gone
+    /// (Paste and Match Style, Insert, Attach Files..., Link..., Smart Links).
+    func testEditMenuTreeMatchesCodemap() throws {
+        let edit = try menu("Edit", in: MainMenu.build())
+        XCTAssertEqual(Self.rows(edit), [
+            "Undo|Cmd+Z|undo:",
+            "Redo|Shift+Cmd+Z|redo:",
+            "----",
+            "Cut|Cmd+X|cut:",
+            "Copy|Cmd+C|copy:",
+            "Paste|Cmd+V|paste:",
+            "Delete||delete:",
+            "Complete|Opt+Esc|complete:",
+            "Select All|Cmd+A|selectAll:",
+            "----",
+            "Find||submenu",
+            "    Find\u{2026}|Cmd+F|performTextFinderAction:|tag 1",
+            "    Find and Replace\u{2026}|Opt+Cmd+F|performTextFinderAction:|tag 12",
+            "    Find Next|Cmd+G|performTextFinderAction:|tag 2",
+            "    Find Previous|Shift+Cmd+G|performTextFinderAction:|tag 3",
+            "    Use Selection for Find|Cmd+E|performTextFinderAction:|tag 7",
+            "    Jump to Selection|Cmd+J|centerSelectionInVisibleArea:",
+            "    Select Line...|Cmd+L|showWindow:",
+            "Spelling and Grammar||submenu",
+            "    Show Spelling and Grammar|Cmd+:|showGuessPanel:",
+            "    Check Document Now|Cmd+;|checkSpelling:",
+            "    ----",
+            "    Check Spelling While Typing||toggleContinuousSpellChecking:",
+            "    Check Grammar With Spelling||toggleGrammarChecking:",
+            "    Correct Spelling Automatically||toggleAutomaticSpellingCorrection:",
+            "Substitutions||submenu",
+            "    Show Substitutions||orderFrontSubstitutionsPanel:",
+            "    ----",
+            "    Smart Copy/Paste||toggleSmartInsertDelete:",
+            "    Smart Quotes||toggleAutomaticQuoteSubstitution:",
+            "    Smart Dashes||toggleAutomaticDashSubstitution:",
+            "    Data Detectors||toggleAutomaticDataDetection:",
+            "    Text Replacement||toggleAutomaticTextReplacement:",
+            "Transformations||submenu",
+            "    Make Upper Case||uppercaseWord:",
+            "    Make Lower Case||lowercaseWord:",
+            "    Capitalize||capitalizeWord:",
+            "Speech||submenu",
+            "    Start Speaking||startSpeaking:",
+            "    Stop Speaking||stopSpeaking:",
+        ])
+    }
+
+    /// Select Line... goes to the one line panel controller (TextEdit:
+    /// `showWindow:` -> LinePanelController); every other Edit item goes to
+    /// the first responder (no target).
+    func testEditMenuTargets() throws {
+        let edit = try menu("Edit", in: MainMenu.build())
+        let selectLine = try XCTUnwrap(edit.item(withTitle: "Find")?.submenu?.item(withTitle: "Select Line..."))
+        XCTAssertTrue(selectLine.target === LinePanelController.shared)
+        func leaves(_ menu: NSMenu) -> [NSMenuItem] {
+            menu.items.flatMap { $0.submenu.map(leaves) ?? ($0.isSeparatorItem ? [] : [$0]) }
+        }
+        for item in leaves(edit) where item !== selectLine {
+            XCTAssertNil(item.target, "\(item.title) has a fixed target")
+        }
+    }
+
+    /// Format keeps only Prevent Editing in M4 (Wrap to Page comes later).
+    func testFormatMenuTree() throws {
+        XCTAssertEqual(Self.rows(try menu("Format", in: MainMenu.build())), ["Prevent Editing||toggleReadOnly:"])
+    }
+
     /// AppKit fills Open Recent in the app's real menu bar.
     func testOpenRecentFillsFromRecentDocuments() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("recent-\(UUID().uuidString).txt")

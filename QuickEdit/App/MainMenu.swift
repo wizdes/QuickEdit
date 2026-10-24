@@ -1,8 +1,9 @@
 import AppKit
 
 /// The menu bar, built in code (contract `app-menu`). Titles, keys and actions
-/// follow docs/codemap.md section 2 (KEEP and CHANGE rows) for the items in the
-/// M1 plan. Items for later milestones are left out, not stubbed.
+/// follow docs/codemap.md section 2 (KEEP and CHANGE rows); order and
+/// separators follow reference/apple/Base.lproj/Edit.nib. Items for later
+/// milestones are left out, not stubbed.
 @MainActor
 enum MainMenu {
     static let appName = "QuickEdit"
@@ -74,6 +75,8 @@ enum MainMenu {
         menu.addItem(item("Copy", #selector(NSText.copy(_:)), "c"))
         menu.addItem(item("Paste", #selector(NSText.paste(_:)), "v"))
         menu.addItem(item("Delete", #selector(NSText.delete(_:))))
+        // Option-Escape, as in the nib (key equivalent U+001B with the Option mask).
+        menu.addItem(item("Complete", #selector(NSTextView.complete(_:)), "\u{1B}", [.option]))
         menu.addItem(item("Select All", #selector(NSText.selectAll(_:)), "a"))
         menu.addItem(.separator())
         menu.addItem(submenuItem(findMenu()))
@@ -95,6 +98,11 @@ enum MainMenu {
                           tag: NSTextFinder.Action.previousMatch.rawValue))
         menu.addItem(item("Use Selection for Find", finder, "e", tag: NSTextFinder.Action.setSearchString.rawValue))
         menu.addItem(item("Jump to Selection", #selector(NSTextView.centerSelectionInVisibleArea(_:)), "j"))
+        // TextEdit's title has three periods, not an ellipsis (Edit.nib line 641,
+        // and macOS 27's TextEdit). The panel is built when first shown.
+        let selectLine = item("Select Line...", #selector(NSWindowController.showWindow(_:)), "l")
+        selectLine.target = LinePanelController.shared
+        menu.addItem(selectLine)
         return menu
     }
 
@@ -117,6 +125,10 @@ enum MainMenu {
         menu.addItem(item("Smart Copy/Paste", #selector(NSTextView.toggleSmartInsertDelete(_:))))
         menu.addItem(item("Smart Quotes", #selector(NSTextView.toggleAutomaticQuoteSubstitution(_:))))
         menu.addItem(item("Smart Dashes", #selector(NSTextView.toggleAutomaticDashSubstitution(_:))))
+        // Kept: on a plain TextKit 1 view it marks dates, addresses and phone
+        // numbers (NSDataDetection temporary attributes) and writes nothing to
+        // the text (EditActionsTests.testDataDetectorsMarksTextWithoutChangingIt).
+        menu.addItem(item("Data Detectors", #selector(NSTextView.toggleAutomaticDataDetection(_:))))
         menu.addItem(item("Text Replacement", #selector(NSTextView.toggleAutomaticTextReplacement(_:))))
         return menu
     }
