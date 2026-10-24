@@ -9,17 +9,26 @@ import Foundation
 struct DecodedText: Equatable, Sendable {
     var text: String
     var format: Format
-    /// The bytes did not fit any encoding and some were replaced to show the
-    /// text. Saving over such a file loses data, so the document warns first.
+    /// Saving the text would not write back the bytes that were read: they
+    /// did not fit any encoding and some were replaced, or (M3+M5 review
+    /// row 1) the encoding maps them to text that encodes to other bytes or
+    /// cannot be encoded at all. Saving over such a file changes it, so the
+    /// document warns first.
     var lossy = false
 
     struct Format: Equatable, Sendable {
         /// For UTF-16 and UTF-32, `.utf16` / `.utf32` mean "little-endian
-        /// with a BOM" (what AppKit writes for them); a big-endian file keeps
-        /// `.utf16BigEndian` / `.utf32BigEndian` so it is written back as found.
+        /// with a BOM" (what AppKit writes for them); a file with a
+        /// big-endian BOM keeps `.utf16BigEndian` / `.utf32BigEndian` so it
+        /// is written back as found.
         var encoding: String.Encoding
         var hasBOM: Bool
         var lineEnding: LineEnding
+        /// A `.utf16` / `.utf32` file read with no BOM (an xattr or an
+        /// explicit choice): AppKit reads it big-endian and names it plain
+        /// UTF-16/32 (M6 review row 4). It is written back as found:
+        /// big-endian, no BOM.
+        var readWithoutBOM = false
 
         /// What a new, untitled document writes: UTF-8, no BOM, LF.
         static let newDocument = Format(encoding: .utf8, hasBOM: false, lineEnding: .lf)
@@ -79,12 +88,20 @@ enum PlainTextIO {
     ///   1. the `com.apple.TextEncoding` xattr of `url`. Bytes that do not fit
     ///      it throw `inapplicableEncoding`, as AppKit refuses such a file;
     ///      there is no next step.
-    ///   2. a BOM (UTF-32, UTF-16, UTF-8). A BOM whose body does not decode
-    ///      is skipped (AppKit then reads the file as Mac Roman, BOM and all).
+    ///   2. a BOM (UTF-32, UTF-16, UTF-8), read as AppKit reads it (M6
+    ///      review row 2): a UTF-16 body drops an odd last byte and shows a
+    ///      lone surrogate as U+FFFD; a UTF-32 body drops an incomplete last
+    ///      unit and is refused (`inapplicableEncoding(.utf32)`) when a unit
+    ///      is not a Unicode scalar; `FF FE 00 00` is a UTF-32 BOM. A UTF-8
+    ///      BOM whose body does not decode is skipped (AppKit then reads the
+    ///      file as Mac Roman, BOM and all).
     ///   3. strict UTF-8.
     ///   4. `fallback`: AppKit's last step, the system's default C-string
     ///      encoding (`String.defaultCStringEncoding`, Mac Roman on this Mac).
     ///   There is no guess: AppKit never guesses.
+    /// - Every decode by a non-Unicode encoding (explicit, xattr or fallback)
+    ///   is encoded once and compared; if the bytes differ, or the text
+    ///   cannot be encoded, the result is marked `lossy` (M3+M5 review row 1).
     /// - Only if `fallback` cannot hold the bytes (never for Mac Roman, which
     ///   maps all 256 byte values) is the text decoded lossily (UTF-8 with
     ///   replacement characters) and marked `lossy`.
@@ -98,7 +115,7 @@ enum PlainTextIO {
             guard let decoded = decode(data, as: named) else { throw Error.inapplicableEncoding(named) }
             return decoded
         }
-        if let decoded = decodeByBOM(data) { return decoded }
+        if let decoded = try decodeByBOM(data) { return decoded }
         if let text = String(validating: data, as: UTF8.self) {
             return DecodedText(text: text, format: .init(encoding: .utf8, hasBOM: false,
                                                          lineEnding: mostCommonLineEnding(in: data)))
@@ -127,7 +144,7 @@ enum PlainTextIO {
         case .utf16:
             if data.starts(with: utf16LEBOM) { return decodeUnicode(data, bom: utf16LEBOM, body: .utf16LittleEndian, as: .utf16) }
             if data.starts(with: utf16BEBOM) { return decodeUnicode(data, bom: utf16BEBOM, body: .utf16BigEndian, as: .utf16BigEndian) }
-            return decodeUnicode(data, bom: nil, body: .utf16BigEndian, as: .utf16BigEndian)
+            return decodeUnicode(data, bom: nil, body: .utf16BigEndian, as: .utf16)
         case .utf16LittleEndian:
             return decodeUnicode(data, bom: data.starts(with: utf16LEBOM) ? utf16LEBOM : nil, body: encoding, as: encoding)
         case .utf16BigEndian:
@@ -135,32 +152,81 @@ enum PlainTextIO {
         case .utf32:
             if data.starts(with: utf32LEBOM) { return decodeUnicode(data, bom: utf32LEBOM, body: .utf32LittleEndian, as: .utf32) }
             if data.starts(with: utf32BEBOM) { return decodeUnicode(data, bom: utf32BEBOM, body: .utf32BigEndian, as: .utf32BigEndian) }
-            return decodeUnicode(data, bom: nil, body: .utf32BigEndian, as: .utf32BigEndian)
+            return decodeUnicode(data, bom: nil, body: .utf32BigEndian, as: .utf32)
         case .utf32LittleEndian:
             return decodeUnicode(data, bom: data.starts(with: utf32LEBOM) ? utf32LEBOM : nil, body: encoding, as: encoding)
         case .utf32BigEndian:
             return decodeUnicode(data, bom: data.starts(with: utf32BEBOM) ? utf32BEBOM : nil, body: encoding, as: encoding)
+        case .ascii:
+            // AppKit reads bytes 0x80-0xFF in an ASCII file as the ISO
+            // Latin 1 characters (M6 review row 3); such text cannot be
+            // written as ASCII again, so the round-trip check marks it lossy.
+            guard let text = String(data: data, encoding: .isoLatin1) else { return nil }
+            let format = DecodedText.Format(encoding: .ascii, hasBOM: false, lineEnding: mostCommonLineEnding(in: data))
+            return DecodedText(text: text, format: format, lossy: (try? encode(text, as: format)) != data)
         default:
             guard let text = String(data: data, encoding: encoding) else { return nil }
-            return DecodedText(text: text, format: .init(encoding: encoding, hasBOM: false,
-                                                         lineEnding: mostCommonLineEnding(in: data)))
+            let format = DecodedText.Format(encoding: encoding, hasBOM: false, lineEnding: mostCommonLineEnding(in: data))
+            // Legacy encodings can map several byte sequences to one character
+            // (cp932 FA 40 and EE EF both read as U+2170), or read bytes as
+            // text they cannot write (EUC-JP 8E E0 as U+FFA0): such a file
+            // would change on save.
+            let roundTrips = (try? encode(text, as: format)) == data
+            return DecodedText(text: text, format: format, lossy: !roundTrips)
         }
     }
 
-    /// UTF-16 or UTF-32 body after an optional BOM. Line endings are counted
-    /// on the decoded text, since CR and LF are not single bytes here.
+    /// UTF-16 or UTF-32 body after an optional BOM, read as AppKit reads it
+    /// (M6 review rows 2 and 3): an incomplete last unit is dropped; in
+    /// UTF-16 a lone surrogate becomes U+FFFD; in UTF-32 a unit that is not
+    /// a Unicode scalar makes the whole body unreadable (nil). The result is
+    /// lossy when it would not write back the same bytes. Line endings are
+    /// counted on the decoded text, since CR and LF are not single bytes here.
     private static func decodeUnicode(_ data: Data, bom: [UInt8]?, body bodyEncoding: String.Encoding,
                                       as recorded: String.Encoding) -> DecodedText? {
-        let body = data.dropFirst(bom?.count ?? 0)
-        let unit = (bodyEncoding == .utf32LittleEndian || bodyEncoding == .utf32BigEndian) ? 4 : 2
-        guard body.count % unit == 0, let text = String(data: Data(body), encoding: bodyEncoding) else { return nil }
-        return DecodedText(text: text, format: .init(encoding: recorded, hasBOM: bom != nil,
-                                                     lineEnding: mostCommonLineEnding(in: text.utf8)))
+        let body = Array(data.dropFirst(bom?.count ?? 0))
+        let text: String
+        switch bodyEncoding {
+        case .utf16LittleEndian, .utf16BigEndian:
+            let little = bodyEncoding == .utf16LittleEndian
+            var units: [UInt16] = []
+            units.reserveCapacity(body.count / 2)
+            var index = 0
+            while index + 1 < body.count {
+                let (a, b) = (UInt16(body[index]), UInt16(body[index + 1]))
+                units.append(little ? a | b << 8 : a << 8 | b)
+                index += 2
+            }
+            text = String(decoding: units, as: UTF16.self) // lone surrogates -> U+FFFD
+        default:
+            let little = bodyEncoding == .utf32LittleEndian
+            var scalars = String.UnicodeScalarView()
+            var index = 0
+            while index + 3 < body.count {
+                let bytes = (UInt32(body[index]), UInt32(body[index + 1]), UInt32(body[index + 2]), UInt32(body[index + 3]))
+                let value = little ? bytes.0 | bytes.1 << 8 | bytes.2 << 16 | bytes.3 << 24
+                                   : bytes.0 << 24 | bytes.1 << 16 | bytes.2 << 8 | bytes.3
+                guard let scalar = Unicode.Scalar(value) else { return nil }
+                scalars.append(scalar)
+                index += 4
+            }
+            text = String(scalars)
+        }
+        let format = DecodedText.Format(encoding: recorded, hasBOM: bom != nil,
+                                        lineEnding: mostCommonLineEnding(in: text.utf8),
+                                        readWithoutBOM: bom == nil && (recorded == .utf16 || recorded == .utf32))
+        return DecodedText(text: text, format: format, lossy: (try? encode(text, as: format)) != data)
     }
 
-    /// UTF-32 BOMs first: the UTF-32 LE BOM starts with the UTF-16 LE one.
-    private static func decodeByBOM(_ data: Data) -> DecodedText? {
-        if data.starts(with: utf32LEBOM) || data.starts(with: utf32BEBOM) { return decode(data, as: .utf32) }
+    /// UTF-32 BOMs first: the UTF-32 LE BOM starts with the UTF-16 LE one,
+    /// and AppKit takes `FF FE 00 00` as UTF-32 even when it was meant as
+    /// UTF-16 starting with U+0000. A UTF-32 body AppKit cannot read is
+    /// refused, as AppKit refuses it.
+    private static func decodeByBOM(_ data: Data) throws -> DecodedText? {
+        if data.starts(with: utf32LEBOM) || data.starts(with: utf32BEBOM) {
+            guard let decoded = decode(data, as: .utf32) else { throw Error.inapplicableEncoding(.utf32) }
+            return decoded
+        }
         if data.starts(with: utf16LEBOM) || data.starts(with: utf16BEBOM) { return decode(data, as: .utf16) }
         if data.starts(with: utf8BOM) { return decode(data, as: .utf8) }
         return nil
@@ -169,8 +235,10 @@ enum PlainTextIO {
     // MARK: Encoding
 
     /// Writes `text` in `format`: a BOM exactly when `hasBOM` (UTF-8,
-    /// UTF-16 LE/BE, UTF-32 LE/BE), always a BOM and little-endian for plain
-    /// `.utf16` and `.utf32` (as AppKit writes them). Never converts line endings.
+    /// UTF-16 LE/BE, UTF-32 LE/BE); plain `.utf16` and `.utf32` write a BOM
+    /// and little-endian (as AppKit writes them), or, for a file read without
+    /// a BOM (`readWithoutBOM`), big-endian with no BOM, as found. Never
+    /// converts line endings.
     static func encode(_ text: String, as format: DecodedText.Format) throws -> Data {
         switch format.encoding {
         case .utf8:
@@ -180,8 +248,12 @@ enum PlainTextIO {
             if format.hasBOM { data.append(contentsOf: utf8BOM) }
             data.append(contentsOf: utf8)
             return data
-        case .utf16: return try unicode(text, bom: utf16LEBOM, body: .utf16LittleEndian)
-        case .utf32: return try unicode(text, bom: utf32LEBOM, body: .utf32LittleEndian)
+        case .utf16:
+            return format.readWithoutBOM ? try unicode(text, bom: nil, body: .utf16BigEndian)
+                                         : try unicode(text, bom: utf16LEBOM, body: .utf16LittleEndian)
+        case .utf32:
+            return format.readWithoutBOM ? try unicode(text, bom: nil, body: .utf32BigEndian)
+                                         : try unicode(text, bom: utf32LEBOM, body: .utf32LittleEndian)
         case .utf16LittleEndian: return try unicode(text, bom: format.hasBOM ? utf16LEBOM : nil, body: format.encoding)
         case .utf16BigEndian: return try unicode(text, bom: format.hasBOM ? utf16BEBOM : nil, body: format.encoding)
         case .utf32LittleEndian: return try unicode(text, bom: format.hasBOM ? utf32LEBOM : nil, body: format.encoding)
@@ -212,12 +284,14 @@ enum PlainTextIO {
     // MARK: The com.apple.TextEncoding extended attribute
 
     /// `<IANA name>;<CFStringEncoding>`, as AppKit writes it (for example
-    /// `windows-1252;1280`, `utf-8;134217984`). Nil for an encoding with no
-    /// IANA name.
+    /// `windows-1252;1280`, `utf-8;134217984`). An encoding with no IANA name
+    /// gets `;<CFStringEncoding>` (Non-lossy ASCII: `;3071`); AppKit reads that
+    /// form by its number (checked on macOS 27.0.1 with
+    /// NSString(contentsOf:usedEncoding:)). Nil only for an encoding CF does not know.
     static func attributeValue(for encoding: String.Encoding) -> String? {
         let cf = CFStringConvertNSStringEncodingToEncoding(encoding.rawValue)
-        guard cf != kCFStringEncodingInvalidId,
-              let name = CFStringConvertEncodingToIANACharSetName(cf) as String? else { return nil }
+        guard cf != kCFStringEncodingInvalidId else { return nil }
+        let name = CFStringConvertEncodingToIANACharSetName(cf) as String? ?? ""
         return "\(name);\(cf)"
     }
 

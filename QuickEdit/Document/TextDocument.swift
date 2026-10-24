@@ -63,16 +63,32 @@ final class TextDocument: NSDocument {
     private struct State {
         var format = DecodedText.Format.newDocument
         var loadedLossily = false
-        /// The encoding chosen in the Open panel for this file, used again
-        /// by a revert until a save records the encoding in the xattr.
-        var openPanelEncoding: String.Encoding?
-        /// The Save panel's encoding while that panel is up or saving.
-        var savePanelEncoding: String.Encoding?
+        /// The Open panel's choice for this file (an encoding or Automatic),
+        /// used again by a revert and an outside-change reload.
+        var openChoice = OpenChoice.none
+        /// The last write recorded the encoding in the xattr.
+        var attributeWritten = true
         /// The format the running save writes, when the Save panel chose a
         /// new encoding; nil means the document's own format.
         var pendingWriteFormat: DecodedText.Format?
     }
     private nonisolated let state = Mutex(State())
+
+    /// What the Open panel said about this file. Automatic is a real choice,
+    /// distinct from "no panel" (M3+M5 review row 2): only "no panel" falls
+    /// back to the `PlainTextEncoding` default.
+    enum OpenChoice: Equatable, Sendable {
+        case none, automatic, encoding(String.Encoding)
+    }
+
+    /// The `preferred` encoding for a decode of this file.
+    private nonisolated func preferredEncoding() -> String.Encoding? {
+        switch state.withLock({ $0.openChoice }) {
+        case .none: Self.defaultOpenEncoding()
+        case .automatic: nil
+        case .encoding(let chosen): chosen
+        }
+    }
 
     #if DEBUG
     /// Seams for unit tests only; compiled out of Release builds.
@@ -85,6 +101,9 @@ final class TextDocument: NSDocument {
         /// Replaces the last-resort fallback encoding (the system's default
         /// C-string encoding), so a test can reach the lossy path.
         var fallbackEncoding: String.Encoding?
+        /// Makes the `com.apple.TextEncoding` write fail, as setxattr can
+        /// (for example on a volume without extended attributes).
+        var failAttributeWrite = false
     }
     nonisolated static let testHooks = Mutex(TestHooks())
     #endif
@@ -121,7 +140,7 @@ final class TextDocument: NSDocument {
 
     /// The `PlainTextEncoding` default: nil means Automatic.
     nonisolated static func defaultOpenEncoding() -> String.Encoding? {
-        let raw = (UserDefaults.standard.object(forKey: DefaultsKey.plainTextEncoding.rawValue) as? NSNumber)?.intValue
+        let raw = (Defaults.store.object(forKey: DefaultsKey.plainTextEncoding.rawValue) as? NSNumber)?.intValue
             ?? Defaults.noStringEncoding
         return raw == Defaults.noStringEncoding ? nil : String.Encoding(rawValue: UInt(raw))
     }
@@ -134,18 +153,12 @@ final class TextDocument: NSDocument {
         Self.testHooks.withLock { $0.onRead }?(Thread.isMainThread)
         #endif
         let data = try Data(contentsOf: url)
-        let preferred: String.Encoding?
         switch DocumentController.takeOpenPanelEncoding(for: url) {
-        case .some(.some(let chosen)):
-            preferred = chosen
-            state.withLock { $0.openPanelEncoding = chosen }
-        case .some(.none): // Automatic chosen in the Open panel
-            preferred = nil
-            state.withLock { $0.openPanelEncoding = nil }
-        case .none:
-            preferred = state.withLock { $0.openPanelEncoding } ?? Self.defaultOpenEncoding()
+        case .some(.some(let chosen)): state.withLock { $0.openChoice = .encoding(chosen) }
+        case .some(.none): state.withLock { $0.openChoice = .automatic }
+        case .none: break // not from the Open panel: keep this document's choice
         }
-        try load(decode(data, url: url, preferred: preferred))
+        try load(decode(data, url: url, preferred: preferredEncoding()))
     }
 
     override nonisolated func read(from data: Data, ofType typeName: String) throws {
@@ -240,10 +253,9 @@ final class TextDocument: NSDocument {
             return
         }
         if data == undecodableOnDisk { return }
-        let preferred = state.withLock { $0.openPanelEncoding } ?? Self.defaultOpenEncoding()
         let decoded: DecodedText
         do {
-            decoded = try decode(data, url: url, preferred: preferred)
+            decoded = try decode(data, url: url, preferred: preferredEncoding())
         } catch {
             undecodableOnDisk = data
             fileModificationDate = onDisk
@@ -252,7 +264,9 @@ final class TextDocument: NSDocument {
         }
         undecodableOnDisk = nil
         fileModificationDate = onDisk
-        guard decoded.text != textStorage.string else {
+        // UTF-16 code units, not Swift's canonical equivalence: "é" and
+        // "e" + U+0301 are different text on disk (M3+M5 review row 4).
+        guard !decoded.text.utf16.elementsEqual(textStorage.string.utf16) else {
             state.withLock {
                 $0.format = decoded.format
                 $0.loadedLossily = decoded.lossy
@@ -290,29 +304,29 @@ final class TextDocument: NSDocument {
         for controller in windowControllers {
             (controller as? DocumentWindowController)?.breakUndoCoalescing()
         }
-        // The Save panel's encoding applies to the save that panel started
-        // (Document.m:1187-1193); a later Cmd+S or autosave never sees it.
-        let fromPanel = (saveOperation == .saveOperation || saveOperation == .saveAsOperation)
-            && savePanel != nil && savePanel?.url?.standardizedFileURL == url.standardizedFileURL
-        savePanel = nil
-        let panelEncoding = state.withLock { state -> String.Encoding? in
-            defer { state.savePanelEncoding = nil }
-            return fromPanel ? state.savePanelEncoding : nil
-        }
+        // The Save panel's encoding applies only to the save that panel made
+        // after it returned OK (Document.m:1187-1193). A cancelled panel, a
+        // later Cmd+S or an autosave never sees it (M3+M5 review row 9).
+        let panelEncoding = panelSession.encodingForSave(saveOperation, to: url, panelURL: savePanel?.url)
         let written = panelEncoding.map { PlainTextIO.format(format, changedTo: $0) }
-        state.withLock { $0.pendingWriteFormat = written }
 
+        // Any operation that writes over the file the text was read from
+        // (Save, Save As or Save To onto it, autosave in place) asks first
+        // when that would change its bytes (M3+M5 review row 3).
         let overwritesLossyFile = loadedLossily && url.standardizedFileURL == fileURL?.standardizedFileURL
-            && (saveOperation == .saveOperation || saveOperation == .autosaveInPlaceOperation)
+            && saveOperation != .autosaveElsewhereOperation
         let save = {
+            self.state.withLock { $0.pendingWriteFormat = written }
             super.save(to: url, ofType: typeName, for: saveOperation) { error in
                 if error == nil, let written {
                     // After a good Save or Save As the chosen encoding becomes
-                    // the document's (Document.m:1232-1234); the xattr now
-                    // records it, so a revert no longer needs the Open panel's.
+                    // the document's (Document.m:1232-1234). The xattr now
+                    // names it, so a revert or reload reads it as Automatic
+                    // does; if the xattr could not be written, the encoding
+                    // itself is kept as the choice.
                     self.state.withLock {
                         $0.format = written
-                        $0.openPanelEncoding = nil
+                        $0.openChoice = $0.attributeWritten ? .automatic : .encoding(written.encoding)
                     }
                 }
                 self.state.withLock { $0.pendingWriteFormat = nil }
@@ -321,10 +335,7 @@ final class TextDocument: NSDocument {
         }
         guard overwritesLossyFile else { return save() }
         askBeforeOverwritingLossyFile { overwrite in
-            if overwrite { save() } else {
-                self.state.withLock { $0.pendingWriteFormat = nil }
-                completionHandler(CocoaError(.userCancelled))
-            }
+            if overwrite { save() } else { completionHandler(CocoaError(.userCancelled)) }
         }
     }
 
@@ -358,7 +369,20 @@ final class TextDocument: NSDocument {
                              userInfo: [NSStringEncodingErrorKey: format.encoding.rawValue, NSURLErrorKey: url])
         }
         try data.write(to: url, options: .atomic)
-        try PlainTextIO.writeAttribute(for: format.encoding, to: url)
+        // The xattr is best effort (M3+M5 review row 10): the bytes are
+        // saved; a file without it opens by BOM, UTF-8 or the fallback.
+        do {
+            #if DEBUG
+            if Self.testHooks.withLock({ $0.failAttributeWrite }) {
+                throw CocoaError(.fileWriteUnknown, userInfo: [NSURLErrorKey: url])
+            }
+            #endif
+            try PlainTextIO.writeAttribute(for: format.encoding, to: url)
+            state.withLock { $0.attributeWritten = true }
+        } catch {
+            state.withLock { $0.attributeWritten = false }
+            FileHandle.standardError.write(Data("QuickEdit: saved \(url.path) but could not record its text encoding: \(error)\n".utf8))
+        }
     }
 
     override func data(ofType typeName: String) throws -> Data {
@@ -369,12 +393,50 @@ final class TextDocument: NSDocument {
 
     override var shouldRunSavePanelWithAccessoryView: Bool { false }
 
+    /// The Save panel this document showed last, and its encoding session.
     private var savePanel: NSSavePanel?
+    private var panelSession = SavePanelSession()
+
+    /// Opens the panel's session; `runModalSavePanel` calls this, and a test
+    /// can play a panel without showing one.
+    func beginSavePanelSession() { panelSession.begin() }
+
+    /// Ends it: the panel was cancelled, or its save finished.
+    func endSavePanelSession() {
+        panelSession.end()
+        savePanel = nil
+    }
+
+    /// Every Save panel AppKit shows for this document comes through here
+    /// (Save of an untitled document, Save As, the "choose another encoding"
+    /// sheet). The panel's choice lives only until AppKit reports the
+    /// panel's outcome, cancelled or saved.
+    override func runModalSavePanel(for saveOperation: NSDocument.SaveOperationType, delegate: Any?,
+                                    didSave didSaveSelector: Selector?, contextInfo: UnsafeMutableRawPointer?) {
+        beginSavePanelSession()
+        let forward = SavePanelCallback { [weak self] didSave in
+            self?.endSavePanelSession()
+            guard let self, let target = delegate as? NSObject, let didSaveSelector else { return }
+            typealias DidSave = @convention(c) (NSObject, Selector, NSDocument, Bool, UnsafeMutableRawPointer?) -> Void
+            let implementation = unsafeBitCast(target.method(for: didSaveSelector), to: DidSave.self)
+            implementation(target, didSaveSelector, self, didSave, contextInfo)
+        }
+        super.runModalSavePanel(for: saveOperation, delegate: forward,
+                                didSave: #selector(SavePanelCallback.document(_:didSave:contextInfo:)), contextInfo: nil)
+    }
+
+    /// Move To may show a Save panel with this accessory; its end closes the session.
+    override func move(completionHandler: ((Bool) -> Void)? = nil) {
+        super.move { didMove in
+            self.endSavePanelSession()
+            completionHandler?(didMove)
+        }
+    }
 
     /// The encoding a new save suggests: `PlainTextEncodingForWrite` when it
     /// is set and holds the text, else UTF-8 (Document.m:368-379).
     func suggestedSaveEncoding() -> String.Encoding {
-        let raw = (UserDefaults.standard.object(forKey: DefaultsKey.plainTextEncodingForWrite.rawValue) as? NSNumber)?.intValue
+        let raw = (Defaults.store.object(forKey: DefaultsKey.plainTextEncodingForWrite.rawValue) as? NSNumber)?.intValue
             ?? Defaults.noStringEncoding
         if raw != Defaults.noStringEncoding {
             let chosen = String.Encoding(rawValue: UInt(raw))
@@ -384,8 +446,13 @@ final class TextDocument: NSDocument {
     }
 
     /// The Save panel's start encoding: the document's if the text still
-    /// fits it, else the suggested one (Document.m:1276-1277).
+    /// fits it, else the suggested one (Document.m:1276-1277). A new
+    /// document that was never read or saved has no encoding of its own yet
+    /// (TextEdit's NoStringEncoding), so it starts at the suggested one: the
+    /// "Saving files" encoding when it holds the text (TextEdit
+    /// `suggestedDocumentEncoding`, M6 review row 6).
     func initialSaveEncoding() -> String.Encoding {
+        if fileURL == nil, !wasRead.load(ordering: .relaxed) { return suggestedSaveEncoding() }
         let current = format.encoding
         return textStorage.string.canBeConverted(to: current) ? current : suggestedSaveEncoding()
     }
@@ -406,7 +473,8 @@ final class TextDocument: NSDocument {
     override func prepareSavePanel(_ savePanel: NSSavePanel) -> Bool {
         self.savePanel = savePanel
         let encoding = initialSaveEncoding()
-        state.withLock { $0.savePanelEncoding = encoding }
+        if !panelSession.isOpen { panelSession.begin() }
+        panelSession.choose(encoding)
 
         let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 628, height: 58))
         let label = NSTextField(labelWithString: "Plain Text Encoding:")
@@ -418,6 +486,11 @@ final class TextDocument: NSDocument {
         popUp.frame = NSRect(x: 234, y: 27, width: 293, height: 26)
         popUp.target = self
         popUp.action = #selector(encodingPopUpChanged(_:))
+        // Also after a Customize Encodings change refills it (M3+M5 review row 6).
+        popUp.refreshEnabledItems = { [weak self] popUp in
+            guard let self else { return }
+            Self.disableUnfitItems(in: popUp, text: self.textStorage.string)
+        }
         Self.disableUnfitItems(in: popUp, text: textStorage.string)
         accessory.addSubview(popUp)
 
@@ -446,7 +519,7 @@ final class TextDocument: NSDocument {
     /// Document.m:743-745.
     @objc private func encodingPopUpChanged(_ sender: EncodingPopUpButton) {
         guard let encoding = sender.selectedEncoding else { return }
-        state.withLock { $0.savePanelEncoding = encoding }
+        panelSession.choose(encoding)
     }
 
     /// Changes only the allowed types, never the typed name (Document.m:737-741).
@@ -668,5 +741,41 @@ private final class SavePanelCallback: NSObject {
         completion?(didSave)
         completion = nil
         keepAlive = nil
+    }
+}
+
+
+/// The Save panel's encoding choice as a small state machine (M3+M5 review
+/// row 9). A session opens when the panel opens and ends when AppKit reports
+/// the panel's outcome. Within it, the one Save or Save As to the panel's URL
+/// (AppKit's save after OK) takes the choice; autosaves neither take nor
+/// clear it. Outside a session nothing is returned.
+struct SavePanelSession {
+    private(set) var isOpen = false
+    private var encoding: String.Encoding?
+    private var used = false
+
+    mutating func begin() {
+        isOpen = true
+        encoding = nil
+        used = false
+    }
+
+    mutating func end() {
+        isOpen = false
+        encoding = nil
+    }
+
+    mutating func choose(_ encoding: String.Encoding) {
+        guard isOpen else { return }
+        self.encoding = encoding
+    }
+
+    mutating func encodingForSave(_ operation: NSDocument.SaveOperationType, to url: URL,
+                                  panelURL: URL?) -> String.Encoding? {
+        guard isOpen, !used, operation == .saveOperation || operation == .saveAsOperation,
+              let panelURL, panelURL.standardizedFileURL == url.standardizedFileURL else { return nil }
+        used = true
+        return encoding
     }
 }

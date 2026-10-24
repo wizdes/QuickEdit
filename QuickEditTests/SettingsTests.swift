@@ -130,7 +130,7 @@ final class SettingsTests: XCTestCase {
 
     /// The value in the app's saved defaults file: what a relaunch reads.
     private func persisted(_ key: DefaultsKey) -> Any? {
-        UserDefaults.standard.persistentDomain(forName: SavedSettings.bundleID)?[key.rawValue]
+        saved.persisted?[key.rawValue]
     }
 
     func testSizeFieldsWriteTheirDefaults() throws {
@@ -161,7 +161,7 @@ final class SettingsTests: XCTestCase {
             XCTAssertTrue(formatter.getObjectValue(&object, for: good, errorDescription: nil), good)
         }
 
-        UserDefaults.standard.set(77, forKey: DefaultsKey.widthInChars.rawValue)
+        Defaults.store.set(77, forKey: DefaultsKey.widthInChars.rawValue)
         controller.refreshControls()
         controller.controlTextDidBeginEditing(Notification(name: NSControl.textDidBeginEditingNotification, object: field))
         field.stringValue = "abc"
@@ -183,17 +183,17 @@ final class SettingsTests: XCTestCase {
             })
             popUp.selectItem(at: utf8)
             XCTAssertTrue(popUp.sendAction(popUp.action, to: popUp.target))
-            XCTAssertEqual(UserDefaults.standard.integer(forKey: key.rawValue), Int(String.Encoding.utf8.rawValue))
+            XCTAssertEqual(Defaults.store.integer(forKey: key.rawValue), Int(String.Encoding.utf8.rawValue))
             XCTAssertEqual((persisted(key) as? NSNumber)?.uintValue, String.Encoding.utf8.rawValue)
             XCTAssertEqual(SettingsWindowController.encoding(for: key), .utf8)
 
             popUp.selectItem(at: 0)
             XCTAssertTrue(popUp.sendAction(popUp.action, to: popUp.target))
-            XCTAssertEqual(UserDefaults.standard.integer(forKey: key.rawValue), Defaults.noStringEncoding)
+            XCTAssertEqual(Defaults.store.integer(forKey: key.rawValue), Defaults.noStringEncoding)
             XCTAssertNil(SettingsWindowController.encoding(for: key))
         }
         // The documents read the same value (TextDocument.defaultOpenEncoding).
-        UserDefaults.standard.set(Int(String.Encoding.windowsCP1252.rawValue), forKey: DefaultsKey.plainTextEncoding.rawValue)
+        Defaults.store.set(Int(String.Encoding.windowsCP1252.rawValue), forKey: DefaultsKey.plainTextEncoding.rawValue)
         XCTAssertEqual(TextDocument.defaultOpenEncoding(), .windowsCP1252)
         XCTAssertEqual(controller.openEncodingPopUp?.selectedEncoding, .windowsCP1252)
     }
@@ -240,18 +240,18 @@ final class SettingsTests: XCTestCase {
         for box in controller.checkboxes.values { box.performClick(nil) }
         controller.widthField?.integerValue = 33
         controller.widthField.map { _ = $0.sendAction($0.action, to: $0.target) }
-        UserDefaults.standard.set(44, forKey: DefaultsKey.heightInChars.rawValue)
-        UserDefaults.standard.set(Int(String.Encoding.utf8.rawValue), forKey: DefaultsKey.plainTextEncoding.rawValue)
-        UserDefaults.standard.set(Int(String.Encoding.utf16.rawValue), forKey: DefaultsKey.plainTextEncodingForWrite.rawValue)
-        UserDefaults.standard.set(4, forKey: DefaultsKey.tabWidth.rawValue)
-        UserDefaults.standard.set(5, forKey: DefaultsKey.autosavingDelay.rawValue)
-        UserDefaults.standard.set(true, forKey: DefaultsKey.numberPagesWhenPrinting.rawValue)
-        UserDefaults.standard.set(false, forKey: DefaultsKey.wrapToFitWhenPrinting.rawValue)
+        Defaults.store.set(44, forKey: DefaultsKey.heightInChars.rawValue)
+        Defaults.store.set(Int(String.Encoding.utf8.rawValue), forKey: DefaultsKey.plainTextEncoding.rawValue)
+        Defaults.store.set(Int(String.Encoding.utf16.rawValue), forKey: DefaultsKey.plainTextEncodingForWrite.rawValue)
+        Defaults.store.set(4, forKey: DefaultsKey.tabWidth.rawValue)
+        Defaults.store.set(5, forKey: DefaultsKey.autosavingDelay.rawValue)
+        Defaults.store.set(true, forKey: DefaultsKey.numberPagesWhenPrinting.rawValue)
+        Defaults.store.set(false, forKey: DefaultsKey.wrapToFitWhenPrinting.rawValue)
         controller.setPlainTextFont(try XCTUnwrap(NSFont(name: "Courier", size: 20)))
 
         let registered = Defaults.registeredValues()
         let changed = registered.filter { key, value in
-            !(UserDefaults.standard.object(forKey: key) as AnyObject).isEqual(value)
+            !(Defaults.store.object(forKey: key) as AnyObject).isEqual(value)
         }
         // All but the hidden app-centric key were changed above.
         XCTAssertEqual(Set(changed.keys), Set(DefaultsKey.allCases.map(\.rawValue)).subtracting([DefaultsKey.encodings.rawValue]))
@@ -260,10 +260,9 @@ final class SettingsTests: XCTestCase {
         restore.performClick(nil)
 
         for (key, value) in registered {
-            XCTAssertTrue((UserDefaults.standard.object(forKey: key) as AnyObject).isEqual(value),
-                          "\(key) is \(String(describing: UserDefaults.standard.object(forKey: key))), not \(value)")
-            XCTAssertNil(UserDefaults.standard.persistentDomain(forName: SavedSettings.bundleID)?[key],
-                         "\(key) is still saved")
+            XCTAssertTrue((Defaults.store.object(forKey: key) as AnyObject).isEqual(value),
+                          "\(key) is \(String(describing: Defaults.store.object(forKey: key))), not \(value)")
+            XCTAssertNil(saved.persisted?[key], "\(key) is still saved")
         }
         XCTAssertEqual(NSFont.userFixedPitchFont(ofSize: 0), systemFont)
         // The controls show the restored values.
@@ -281,9 +280,9 @@ final class SettingsTests: XCTestCase {
     func testControlsFollowOutsideChanges() throws {
         let controller = makeController()
         let box = try XCTUnwrap(controller.checkboxes[.smartQuotes])
-        UserDefaults.standard.set(true, forKey: DefaultsKey.smartQuotes.rawValue)
+        Defaults.store.set(true, forKey: DefaultsKey.smartQuotes.rawValue)
         XCTAssertEqual(box.state, .on)
-        UserDefaults.standard.set(false, forKey: DefaultsKey.smartQuotes.rawValue)
+        Defaults.store.set(false, forKey: DefaultsKey.smartQuotes.rawValue)
         XCTAssertEqual(box.state, .off)
     }
 
@@ -339,11 +338,17 @@ final class SettingsTests: XCTestCase {
     }
 }
 
-/// The app's saved defaults and plain font, taken before a test and put
-/// back after it, so tests never leave the user's settings changed.
+/// Test settings (M6 review row 14): a fresh UserDefaults suite becomes
+/// `Defaults.store` for one test, so the app's settings code reads and
+/// writes it and never the user's real settings. The plain font is stored
+/// by AppKit in the standard defaults, so it is taken and put back, with
+/// the app's real saved domain as a second guard.
 @MainActor
 struct SavedSettings {
     static let bundleID = Bundle.main.bundleIdentifier ?? "dev.yili.QuickEdit"
+    /// The suite's name; its saved values are what a relaunch would read.
+    let suiteName = "dev.yili.QuickEdit.tests-\(UUID().uuidString)"
+    let store: UserDefaults
     private let domain: [String: Any]?
     private let fixedPitchFont: NSFont?
 
@@ -351,9 +356,19 @@ struct SavedSettings {
         domain = UserDefaults.standard.persistentDomain(forName: Self.bundleID)
         let hasFont = domain?["NSFixedPitchFont"] != nil
         fixedPitchFont = hasFont ? NSFont.userFixedPitchFont(ofSize: 0) : nil
+        guard let suite = UserDefaults(suiteName: suiteName) else {
+            preconditionFailure("cannot make the test defaults suite \(suiteName)")
+        }
+        store = suite
+        Defaults.store = suite
     }
 
+    /// The suite's saved values.
+    var persisted: [String: Any]? { store.persistentDomain(forName: suiteName) }
+
     func restore() {
+        Defaults.store = .standard
+        store.removePersistentDomain(forName: suiteName)
         NSFont.setUserFixedPitch(fixedPitchFont)
         if let domain {
             UserDefaults.standard.setPersistentDomain(domain, forName: Self.bundleID)

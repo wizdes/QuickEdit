@@ -202,6 +202,15 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
         let page = pagesView.numberOfPages
         pagesView.setNumberOfPages(page + 1)
         let (textView, container) = TextViewFactory.makePageTextView(frame: pagesView.documentRect(forPage: page))
+        // As TextEdit's addPage (DocumentWindowController.m:487): the new
+        // view gets the window's typing attributes and paragraph style before
+        // it joins the layout manager (M3+M5 review row 13). They are copied
+        // from the first view, so a Settings change made since the window
+        // opened does not reach it (Settings apply to new windows).
+        if let first = layoutManager.textContainers.first?.textView {
+            textView.defaultParagraphStyle = first.defaultParagraphStyle
+            textView.typingAttributes = first.typingAttributes
+        }
         pagesView.addSubview(textView)
         if inFront {
             layoutManager.insertTextContainer(container, at: 0)
@@ -493,11 +502,20 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
     /// hold; the question is asked once the edit is in the storage.
     private var encodingCheckPending = false
 
-    /// Return and Enter type the document's main line ending (LF for new
-    /// documents), so a CRLF or CR file stays that way. Better than TextEdit,
-    /// which always types LF (docs/codemap.md 4.3). Paste is untouched.
+    /// Commands that type a new line: Return and Enter, Option-Return, and
+    /// insertParagraphSeparator: (M3+M5 review row 12). insertLineBreak:
+    /// keeps AppKit's U+2028.
+    private static let newlineCommands: Set<Selector> = [
+        #selector(NSResponder.insertNewline(_:)),
+        #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)),
+        #selector(NSResponder.insertParagraphSeparator(_:)),
+    ]
+
+    /// They type the document's main line ending (LF for new documents), so
+    /// a CRLF or CR file stays that way. Better than TextEdit, which always
+    /// types LF (docs/codemap.md 4.3). Paste is untouched.
     func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-        guard commandSelector == #selector(NSResponder.insertNewline(_:)),
+        guard Self.newlineCommands.contains(commandSelector),
               let document = document as? TextDocument else { return false }
         let ending = document.format.lineEnding
         guard ending != .lf else { return false }
@@ -509,17 +527,33 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
     /// failing edit gets its own undo step, so Cancel takes back just it.
     func textView(_ textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange,
                   replacementString: String?) -> Bool {
-        if let replacementString, let document = document as? TextDocument,
-           document.insertionDoesNotFit(replacementString) {
-            textView.breakUndoCoalescing()
-            encodingCheckPending = true
-        }
+        checkInsertion([replacementString].compactMap { $0 }, in: textView)
         return true
+    }
+
+    /// Edits of several ranges at once, such as Replace All: every
+    /// replacement string is checked (M3+M5 review row 14). When this method
+    /// exists AppKit calls it instead of the one-range method.
+    func textView(_ textView: NSTextView, shouldChangeTextInRanges affectedRanges: [NSValue],
+                  replacementStrings: [String]?) -> Bool {
+        checkInsertion(replacementStrings ?? [], in: textView)
+        return true
+    }
+
+    private func checkInsertion(_ strings: [String], in textView: NSTextView) {
+        guard let document = document as? TextDocument,
+              strings.contains(where: { document.insertionDoesNotFit($0) }) else { return }
+        textView.breakUndoCoalescing()
+        encodingCheckPending = true
     }
 
     func textDidChange(_ notification: Notification) {
         guard encodingCheckPending else { return }
         encodingCheckPending = false
+        // While an input method composes, the marked text is not the user's
+        // text yet: no question. The commit is checked again by itself
+        // (M3+M5 review row 15).
+        if (notification.object as? NSTextView)?.hasMarkedText() == true { return }
         guard let document = document as? TextDocument else { return }
         document.encodingNoLongerFits { [weak self] in
             self?.textView.undoManager?.undo()

@@ -27,13 +27,19 @@ enum DefaultsKey: String, CaseIterable {
 }
 
 enum Defaults {
+    /// Where QuickEdit reads and writes its settings: `.standard` in the app.
+    /// Tests put a suite of their own here, so they never write the user's
+    /// real settings (M6 review row 14). Set only on the main thread, before
+    /// the code under test runs; read from any thread.
+    nonisolated(unsafe) static var store: UserDefaults = .standard
+
     /// TextEdit's `NoStringEncoding` (EncodingManager.h:54): "Automatic" or "none".
     static let noStringEncoding: Int = 0xFFFF_FFFF
 
     /// Registered once at launch, before any window.
     @MainActor
     static func register() {
-        UserDefaults.standard.register(defaults: registeredValues())
+        store.register(defaults: registeredValues())
     }
 
     @MainActor
@@ -69,11 +75,11 @@ enum Defaults {
     /// registered value, so the encodings list stays, as in TextEdit.
     @MainActor
     static func restoreAll() {
-        let defaults = UserDefaults.standard
+        let defaults = store
         for key in registeredValues().keys { defaults.removeObject(forKey: key) }
         NSFont.setUserFixedPitch(nil)
     }
 
-    static func bool(_ key: DefaultsKey) -> Bool { UserDefaults.standard.bool(forKey: key.rawValue) }
-    static func integer(_ key: DefaultsKey) -> Int { UserDefaults.standard.integer(forKey: key.rawValue) }
+    static func bool(_ key: DefaultsKey) -> Bool { store.bool(forKey: key.rawValue) }
+    static func integer(_ key: DefaultsKey) -> Int { store.integer(forKey: key.rawValue) }
 }

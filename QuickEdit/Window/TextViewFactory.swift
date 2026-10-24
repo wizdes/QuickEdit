@@ -23,7 +23,7 @@ enum TextViewFactory {
     static func plainParagraphStyle(font: NSFont) -> NSParagraphStyle {
         let style = NSMutableParagraphStyle()
         style.tabStops = []
-        style.defaultTabInterval = CGFloat(max(1, UserDefaults.standard.integer(forKey: DefaultsKey.tabWidth.rawValue)))
+        style.defaultTabInterval = CGFloat(max(1, Defaults.store.integer(forKey: DefaultsKey.tabWidth.rawValue)))
             * xAdvance(of: font)
         return style
     }

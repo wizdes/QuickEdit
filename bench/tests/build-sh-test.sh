@@ -62,5 +62,61 @@ for cmd in unit test; do
     fi
 done
 
+# 4. `speed` (M3+M5 review row 7) runs the three speed tests in an optimized
+#    Debug build with its own derived data, removed afterwards, and fails
+#    when xcodebuild fails. Fake xcodegen and xcodebuild record what ran.
+mkdir -p "$WORK/speed-bin"
+printf '#!/bin/bash\nexit 0\n' >"$WORK/speed-bin/xcodegen"
+cat >"$WORK/speed-bin/xcodebuild" <<FAKE
+#!/bin/bash
+printf '%s\n' "\$@" >"$WORK/speed-args"
+prev=""
+for a in "\$@"; do
+    if [ "\$prev" = "-derivedDataPath" ]; then mkdir -p "\$a"; echo "\$a" >"$WORK/speed-derived"; fi
+    prev="\$a"
+done
+exit 1
+FAKE
+chmod +x "$WORK/speed-bin/xcodegen" "$WORK/speed-bin/xcodebuild"
+out="$(PATH="$WORK/speed-bin:$PATH" "$ROOT/build.sh" speed 2>&1)"; status=$?
+args="$(cat "$WORK/speed-args" 2>/dev/null)"
+derived="$(cat "$WORK/speed-derived" 2>/dev/null)"
+missing=""
+for want in "-configuration" "Debug" "SWIFT_OPTIMIZATION_LEVEL=-O" "SWIFT_COMPILATION_MODE=wholemodule" \
+    "CODE_SIGN_IDENTITY=-" "ENABLE_HARDENED_RUNTIME=NO" \
+    "-only-testing:QuickEditTests/LinePanelTests/testSelectLineOneMillionIn100MB" \
+    "-only-testing:QuickEditTests/LinePanelTests/testSelectLineBackNearlyOneMillionIn100MB" \
+    "-only-testing:QuickEditTests/PageModeTests/testTenMegabyteSwitchTime"; do
+    grep -qxF -- "$want" <<<"$args" || missing+=" $want"
+done
+if [ "$status" -ne 0 ] && [ -z "$missing" ] && [ -n "$derived" ] && [ "$derived" != "$ROOT/build/DerivedData" ] \
+    && [ ! -e "$derived" ]; then
+    pass "./build.sh speed runs the speed tests optimized in its own derived data and removes it"
+else
+    fail "./build.sh speed (exit $status, missing args:${missing:-none}, derived: ${derived:-none}, left behind: $([ -n "$derived" ] && [ -e "$derived" ] && echo yes || echo no)): $(tail -2 <<<"$out")"
+fi
+
+# 5. `uicheck` (M6 review row 11): any error inside the check means NOT
+#    possible and a non-zero exit. (a) TMPDIR cannot be written, so bash
+#    cannot make temp files (here-strings use them); the screen is locked.
+#    (b) automationmodetool fails and prints nothing; the screen is unlocked.
+mkdir -p "$WORK/lock-small-bin" "$WORK/amt-fail-bin"
+printf '#!/bin/bash\nprintf "\\t<key>CGSSessionScreenIsLocked</key>\\n\\t<true/>\\n"\n' >"$WORK/lock-small-bin/ioreg"
+printf '#!/bin/bash\nprintf "\\t<key>CGSSessionOnConsoleKey</key>\\n\\t<true/>\\n"\n' >"$WORK/amt-fail-bin/ioreg"
+printf '#!/bin/bash\nexit 1\n' >"$WORK/amt-fail-bin/automationmodetool"
+chmod +x "$WORK/lock-small-bin/ioreg" "$WORK/amt-fail-bin/ioreg" "$WORK/amt-fail-bin/automationmodetool"
+out="$(TMPDIR="$WORK/no-such-tmp" PATH="$WORK/lock-small-bin:$PATH" "$ROOT/build.sh" uicheck 2>&1)"; status=$?
+if [ "$status" -ne 0 ] && grep -q "NOT" <<<"$out"; then
+    pass "uicheck with an unwritable TMPDIR reports NOT possible"
+else
+    fail "uicheck with an unwritable TMPDIR (exit $status): $(tail -2 <<<"$out")"
+fi
+out="$(PATH="$WORK/amt-fail-bin:$PATH" "$ROOT/build.sh" uicheck 2>&1)"; status=$?
+if [ "$status" -ne 0 ] && grep -q "NOT" <<<"$out"; then
+    pass "uicheck with a failing automationmodetool reports NOT possible"
+else
+    fail "uicheck with a failing automationmodetool (exit $status): $(tail -2 <<<"$out")"
+fi
+
 echo "build-sh-test: $fails failure(s)"
 [ "$fails" -eq 0 ]

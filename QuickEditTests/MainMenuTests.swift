@@ -188,6 +188,27 @@ final class MainMenuTests: XCTestCase {
         ])
     }
 
+    // MARK: No printing (user decision, 2026-10-24)
+
+    /// QuickEdit does no real printing, only PDF output: no menu item may
+    /// open the system Page Setup sheet or the Print panel, which make the
+    /// print helper look for printers on the local network (and so trigger
+    /// macOS's "find devices on local networks" prompt).
+    func testMenuBarHasNoPageSetupOrPrintItems() throws {
+        let banned: Set<String> = ["runPageLayout:", "printDocument:", "print:"]
+        func offenders(_ menu: NSMenu, path: String) -> [String] {
+            menu.items.flatMap { item -> [String] in
+                let here = path + "/" + item.title
+                var found = item.action.map(NSStringFromSelector).map { banned.contains($0) ? [here + " -> " + $0] : [] } ?? []
+                if let submenu = item.submenu { found += offenders(submenu, path: here) }
+                return found
+            }
+        }
+        XCTAssertEqual(offenders(MainMenu.build(), path: ""), [], "the built menu bar")
+        let live = try XCTUnwrap(NSApp.mainMenu, "the app's menu bar, built at launch")
+        XCTAssertEqual(offenders(live, path: ""), [], "the app's menu bar")
+    }
+
     // MARK: M4 n1: the Edit and Format menus
 
     /// One row per item, nested items indented four spaces:

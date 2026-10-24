@@ -34,7 +34,7 @@ final class EncodingManager: NSObject {
 
     /// The `Encodings` default, or the first-run list when it is not set.
     nonisolated static func enabledEncodings() -> [String.Encoding] {
-        guard let numbers = UserDefaults.standard.array(forKey: DefaultsKey.encodings.rawValue) else {
+        guard let numbers = Defaults.store.array(forKey: DefaultsKey.encodings.rawValue) else {
             return defaultEncodings()
         }
         return numbers.compactMap { ($0 as? NSNumber).map { String.Encoding(rawValue: $0.uintValue) } }
@@ -79,13 +79,13 @@ final class EncodingManager: NSObject {
 
     /// Saves a new list and tells every pop-up (EncodingManager.m:255-267).
     func setEnabled(_ encodings: [String.Encoding]) {
-        UserDefaults.standard.set(encodings.map { NSNumber(value: $0.rawValue) }, forKey: DefaultsKey.encodings.rawValue)
+        Defaults.store.set(encodings.map { NSNumber(value: $0.rawValue) }, forKey: DefaultsKey.encodings.rawValue)
         listDidChange()
     }
 
     /// Removes the saved list, so the first-run list applies again (:319-325).
     func revertToDefault() {
-        UserDefaults.standard.removeObject(forKey: DefaultsKey.encodings.rawValue)
+        Defaults.store.removeObject(forKey: DefaultsKey.encodings.rawValue)
         listDidChange()
     }
 
@@ -99,18 +99,26 @@ final class EncodingManager: NSObject {
     /// Fills `popUp` (EncodingManager.m:185-223): "Automatic" first when
     /// asked, the enabled encodings (plus `selected` when it is missing and
     /// there is no Automatic item), a separator, "Customize Encodings List…".
+    /// With an Automatic item, a `selected` encoding missing from the list
+    /// is put above Automatic and selected, so a saved default that left the
+    /// list still shows (M6 review row 7; TextEdit shows Automatic instead).
     /// Every encoding item carries its number as `representedObject`;
     /// Automatic carries `Defaults.noStringEncoding`.
     static func fill(_ popUp: NSPopUpButton, selected: String.Encoding?, includeAutomatic: Bool) {
         popUp.removeAllItems()
         let menu = popUp.menu ?? NSMenu()
+        var encodings = enabledEncodings()
+        if includeAutomatic, let selected, !encodings.contains(selected) {
+            let kept = NSMenuItem(title: String.localizedName(of: selected), action: nil, keyEquivalent: "")
+            kept.representedObject = NSNumber(value: selected.rawValue)
+            menu.addItem(kept)
+        }
         if includeAutomatic {
             let automatic = NSMenuItem(title: "Automatic", action: nil, keyEquivalent: "")
             automatic.representedObject = NSNumber(value: Defaults.noStringEncoding)
             automatic.tag = automaticTag
             menu.addItem(automatic)
         }
-        var encodings = enabledEncodings()
         if !includeAutomatic, let selected, !encodings.contains(selected) { encodings.append(selected) }
         var selectIndex = 0
         for encoding in encodings {
@@ -247,10 +255,19 @@ final class EncodingPopUpButton: NSPopUpButton {
     /// The chosen encoding, or nil for Automatic.
     var selectedEncoding: String.Encoding? { EncodingManager.encoding(of: selectedItem) }
 
+    /// Decides which items are enabled; run again after every refill, so
+    /// encodings added in Customize Encodings get the same check (M3+M5
+    /// review row 6). Without it, a refill keeps the items that were off.
+    var refreshEnabledItems: ((EncodingPopUpButton) -> Void)?
+
     @objc private func listChanged(_ notification: Notification) {
         let selected = selectedEncoding
         let disabled = Set(itemArray.filter { !$0.isEnabled }.compactMap { EncodingManager.encoding(of: $0)?.rawValue })
         EncodingManager.fill(self, selected: selected, includeAutomatic: includesAutomatic)
+        if let refreshEnabledItems {
+            refreshEnabledItems(self)
+            return
+        }
         for item in itemArray where EncodingManager.encoding(of: item).map({ disabled.contains($0.rawValue) }) == true {
             item.isEnabled = false
         }

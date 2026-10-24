@@ -40,6 +40,13 @@ final class EncodingTests: XCTestCase {
         return .success(encoding)
     }
 
+    /// The text AppKit's plain-text reader shows for a file it opens (M6
+    /// review row 5: compare the text, not only the encoding number).
+    private func oracleText(_ url: URL) -> String? {
+        try? NSAttributedString(url: url, options: [.documentType: NSAttributedString.DocumentType.plain],
+                                documentAttributes: nil).string
+    }
+
     /// AppKit names both UTF-16 byte orders "UTF-16" (and both UTF-32 ones
     /// "UTF-32"); QuickEdit keeps big-endian apart so it writes it back.
     private func comparable(_ format: DecodedText.Format) -> UInt {
@@ -124,6 +131,8 @@ final class EncodingTests: XCTestCase {
                 continue
             }
             XCTAssertFalse(decoded.lossy, "\(name) loaded lossily")
+            XCTAssertEqual(decoded.text.unicodeScalars.map(\.value), oracleText(url)?.unicodeScalars.map(\.value),
+                           "\(name): the text differs from AppKit's")
 
             // Byte round trip through PlainTextIO.
             let encoded = try PlainTextIO.encode(decoded.text, as: decoded.format)
@@ -214,13 +223,17 @@ final class EncodingTests: XCTestCase {
     func testPreferredUTF16WithoutBOMIsBigEndianAsInAppKit() throws {
         let decoded = try PlainTextIO.decode(Data([0x00, 0x61, 0x00, 0x62]), preferred: .utf16)
         XCTAssertEqual(decoded.text, "ab")
-        XCTAssertEqual(decoded.format, .init(encoding: .utf16BigEndian, hasBOM: false, lineEnding: .lf))
+        // AppKit names it plain UTF-16, not UTF-16BE (M6 review row 4); it
+        // is written back big-endian with no BOM, as found.
+        XCTAssertEqual(decoded.format, .init(encoding: .utf16, hasBOM: false, lineEnding: .lf, readWithoutBOM: true))
         XCTAssertEqual(try PlainTextIO.encode(decoded.text, as: decoded.format), Data([0x00, 0x61, 0x00, 0x62]))
     }
 
     func testFallbackFailureDecodesLossily() throws {
-        // Not UTF-8, and the fallback (ASCII here) cannot hold 0x81.
-        let decoded = try PlainTextIO.decode(Data(EncodingFixtures.invalidEverywhere), fallback: .ascii)
+        // Not UTF-8, and the fallback (Windows Latin 1 here) cannot hold 0x81.
+        // (ASCII was used until M6 review row 3: AppKit reads high bytes in
+        // ASCII as Latin 1, so ASCII now holds every byte.)
+        let decoded = try PlainTextIO.decode(Data(EncodingFixtures.invalidEverywhere), fallback: .windowsCP1252)
         XCTAssertTrue(decoded.lossy)
         XCTAssertEqual(decoded.format.encoding, .utf8)
         XCTAssertTrue(decoded.text.contains("\u{FFFD}"))
@@ -323,7 +336,8 @@ final class EncodingTests: XCTestCase {
     }
 
     func testDocumentRecordsALossyLoad() throws {
-        TextDocument.testHooks.withLock { $0.fallbackEncoding = .ascii }
+        // A fallback that cannot hold 0x81 (M6 review row 3: no longer ASCII).
+        TextDocument.testHooks.withLock { $0.fallbackEncoding = .windowsCP1252 }
         let url = folder.appendingPathComponent("lossy.txt")
         try Data(EncodingFixtures.invalidEverywhere).write(to: url)
         let document = try TextDocument(contentsOf: url, ofType: TextDocument.plainTextType)

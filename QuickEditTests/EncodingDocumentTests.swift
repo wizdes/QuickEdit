@@ -8,19 +8,14 @@ import XCTest
 final class EncodingDocumentTests: XCTestCase {
     private var folder: URL!
     private var documents: [TextDocument] = []
-    private var savedDefaults: [String: Any?] = [:]
-    private let keys = [DefaultsKey.encodings.rawValue, DefaultsKey.plainTextEncoding.rawValue,
-                        DefaultsKey.plainTextEncodingForWrite.rawValue]
+    /// A defaults suite of this test's own (M6 review row 14).
+    private var saved: SavedSettings!
 
     override func setUp() async throws {
         folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("QuickEditEncodingDocTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        // These tests change the app's own defaults; put them back afterwards.
-        for key in keys {
-            savedDefaults[key] = UserDefaults.standard.persistentDomain(forName: Bundle.main.bundleIdentifier!)?[key]
-            UserDefaults.standard.removeObject(forKey: key)
-        }
+        saved = SavedSettings()
         TextDocument.testHooks.withLock { $0 = .init() }
     }
 
@@ -30,13 +25,7 @@ final class EncodingDocumentTests: XCTestCase {
             document.close()
         }
         documents = []
-        for key in keys {
-            if let value = savedDefaults[key] ?? nil {
-                UserDefaults.standard.set(value, forKey: key)
-            } else {
-                UserDefaults.standard.removeObject(forKey: key)
-            }
-        }
+        saved.restore()
         TextDocument.testHooks.withLock { $0 = .init() }
         if let folder { try FileManager.default.removeItem(at: folder) }
     }
@@ -137,7 +126,7 @@ final class EncodingDocumentTests: XCTestCase {
         XCTAssertEqual(EncodingManager.enabledEncodings(), [.utf8, .shiftJIS])
         EncodingManager.shared.revertToDefault()
         XCTAssertEqual(EncodingManager.enabledEncodings(), EncodingManager.defaultEncodings())
-        XCTAssertNil(UserDefaults.standard.object(forKey: DefaultsKey.encodings.rawValue))
+        XCTAssertNil(Defaults.store.object(forKey: DefaultsKey.encodings.rawValue))
     }
 
     func testCustomizePanelIsBuiltInCodeWithACheckboxPerEncoding() throws {
@@ -164,14 +153,14 @@ final class EncodingDocumentTests: XCTestCase {
     // MARK: n2 step 2: the Open panel
 
     func testOpenPanelStartsAtThePlainTextEncodingDefault() {
-        UserDefaults.standard.set(Int(String.Encoding.windowsCP1252.rawValue), forKey: DefaultsKey.plainTextEncoding.rawValue)
+        Defaults.store.set(Int(String.Encoding.windowsCP1252.rawValue), forKey: DefaultsKey.plainTextEncoding.rawValue)
         XCTAssertEqual(TextDocument.defaultOpenEncoding(), .windowsCP1252)
         let popUp = EncodingPopUpButton(selected: TextDocument.defaultOpenEncoding(), includeAutomatic: true)
         XCTAssertEqual(popUp.selectedEncoding, .windowsCP1252)
     }
 
     func testPlainTextEncodingDefaultAppliesToOpensWithoutThePanel() throws {
-        UserDefaults.standard.set(Int(String.Encoding.windowsCP1252.rawValue), forKey: DefaultsKey.plainTextEncoding.rawValue)
+        Defaults.store.set(Int(String.Encoding.windowsCP1252.rawValue), forKey: DefaultsKey.plainTextEncoding.rawValue)
         let url = try file("default.txt", Array("caf\u{E9}".utf8))
         let document = try open(url, window: false)
         XCTAssertEqual(document.format.encoding, .windowsCP1252)
@@ -179,7 +168,7 @@ final class EncodingDocumentTests: XCTestCase {
     }
 
     func testAutomaticInTheOpenPanelOverridesTheDefault() throws {
-        UserDefaults.standard.set(Int(String.Encoding.windowsCP1252.rawValue), forKey: DefaultsKey.plainTextEncoding.rawValue)
+        Defaults.store.set(Int(String.Encoding.windowsCP1252.rawValue), forKey: DefaultsKey.plainTextEncoding.rawValue)
         let url = try file("auto.txt", Array("caf\u{E9}".utf8))
         DocumentController.setOpenPanelEncoding(nil, for: [url])
         let document = try open(url, window: false)
@@ -237,7 +226,7 @@ final class EncodingDocumentTests: XCTestCase {
     func testSuggestedEncodingHonorsTheWriteDefaultWhenItFits() throws {
         let document = try open(try file("ja.txt", Array("日本\n".utf8)), window: false)
         XCTAssertEqual(document.suggestedSaveEncoding(), .utf8, "no write default: UTF-8")
-        UserDefaults.standard.set(Int(String.Encoding.shiftJIS.rawValue), forKey: DefaultsKey.plainTextEncodingForWrite.rawValue)
+        Defaults.store.set(Int(String.Encoding.shiftJIS.rawValue), forKey: DefaultsKey.plainTextEncodingForWrite.rawValue)
         XCTAssertEqual(document.suggestedSaveEncoding(), .shiftJIS, "the write default holds this text")
         document.textStorage.replaceCharacters(in: NSRange(location: 0, length: 0), with: "\u{20AC} ")
         XCTAssertEqual(document.suggestedSaveEncoding(), .utf8, "the write default no longer fits")
@@ -448,7 +437,8 @@ final class EncodingDocumentTests: XCTestCase {
     // MARK: n3 step 2: a lossily loaded file
 
     private func lossyDocument(_ presenter: FakePresenter) throws -> (TextDocument, URL) {
-        TextDocument.testHooks.withLock { $0.fallbackEncoding = .ascii }
+        // A fallback that cannot hold 0x81 (M6 review row 3: no longer ASCII).
+        TextDocument.testHooks.withLock { $0.fallbackEncoding = .windowsCP1252 }
         let url = try file("lossy-\(UUID().uuidString).txt", EncodingFixtures.invalidEverywhere)
         let document = try open(url)
         TextDocument.testHooks.withLock { $0.fallbackEncoding = nil }

@@ -55,6 +55,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
     /// (Preferences.m:211-220).
     private var originalDimensionValue = 0
 
+    /// The UserDefaults.didChangeNotification observer.
+    private var defaultsObserver: NSObjectProtocol?
+
     init() {
         super.init(window: nil)
     }
@@ -137,10 +140,16 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
 
         tabView = tabs
         restoreButton = restore
+        linkKeyViews(window)
         self.window = window
         refreshControls()
-        NotificationCenter.default.addObserver(self, selector: #selector(defaultsChanged(_:)),
-                                               name: UserDefaults.didChangeNotification, object: nil)
+        // UserDefaults posts this on the thread that wrote the default, which
+        // can be a background thread; a selector on this main-actor class
+        // would trap there (M6 review row 1). The block runs on the main queue.
+        defaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshControls() }
+        }
         return window
     }
 
@@ -241,6 +250,20 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         return view
     }
 
+    /// Tab order in reading order on each tab, each a closed loop; the
+    /// Width field gets focus first (M6 review row 13).
+    private func linkKeyViews(_ window: NSWindow) {
+        let options = Self.optionColumns.flatMap { $0 }.compactMap { checkboxes[$0.0] }
+        let newDocument: [NSView] = [checkboxes[.showPageBreaks], widthField, heightField, changeFontButton]
+            .compactMap { $0 } + options
+        let openAndSave: [NSView] = [checkboxes[.addExtensionToNewPlainTextFiles], openEncodingPopUp, saveEncodingPopUp]
+            .compactMap { $0 }
+        for loop in [newDocument, openAndSave] {
+            for (index, view) in loop.enumerated() { view.nextKeyView = loop[(index + 1) % loop.count] }
+        }
+        window.initialFirstResponder = widthField
+    }
+
     // MARK: Control builders
 
     private static var smallFont: NSFont { .systemFont(ofSize: NSFont.systemFontSize(for: .small)) }
@@ -304,7 +327,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
 
     /// The encoding a default names, or nil for Automatic.
     static func encoding(for key: DefaultsKey) -> String.Encoding? {
-        let raw = (UserDefaults.standard.object(forKey: key.rawValue) as? NSNumber)?.intValue ?? Defaults.noStringEncoding
+        let raw = (Defaults.store.object(forKey: key.rawValue) as? NSNumber)?.intValue ?? Defaults.noStringEncoding
         return raw == Defaults.noStringEncoding ? nil : String.Encoding(rawValue: UInt(raw))
     }
 
@@ -330,35 +353,39 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
     }
 
     /// Selects `encoding` (nil: Automatic). An encoding missing from the
-    /// list shows as Automatic, though the default keeps its value.
+    /// list is shown as an extra item at the top (M6 review row 7).
     private func select(_ encoding: String.Encoding?, in popUp: NSPopUpButton?) {
         guard let popUp else { return }
         let raw = encoding.map { Int($0.rawValue) } ?? Defaults.noStringEncoding
-        let index = popUp.itemArray.firstIndex { ($0.representedObject as? NSNumber)?.intValue == raw } ?? 0
-        popUp.selectItem(at: index)
+        if let index = popUp.itemArray.firstIndex(where: { ($0.representedObject as? NSNumber)?.intValue == raw }) {
+            popUp.selectItem(at: index)
+        } else {
+            EncodingManager.fill(popUp, selected: encoding, includeAutomatic: true)
+        }
     }
 
-    @objc private func defaultsChanged(_ notification: Notification) {
-        refreshControls()
-    }
 
     // MARK: Actions: each control writes its default
 
     @objc func checkboxChanged(_ sender: NSButton) {
         guard let raw = sender.identifier?.rawValue, let key = DefaultsKey(rawValue: raw) else { return }
-        UserDefaults.standard.set(sender.state == .on, forKey: key.rawValue)
+        Defaults.store.set(sender.state == .on, forKey: key.rawValue)
     }
 
     @objc func sizeFieldChanged(_ sender: NSTextField) {
-        guard let raw = sender.identifier?.rawValue, let key = DefaultsKey(rawValue: raw),
-              let number = sender.objectValue as? NSNumber else { return }
-        UserDefaults.standard.set(number.intValue, forKey: key.rawValue)
+        guard let raw = sender.identifier?.rawValue, let key = DefaultsKey(rawValue: raw) else { return }
+        guard let number = sender.objectValue as? NSNumber else {
+            // Emptied: show the value again, keep the default (M6 review row 10).
+            sender.integerValue = Defaults.integer(key)
+            return
+        }
+        Defaults.store.set(number.intValue, forKey: key.rawValue)
     }
 
     @objc func encodingChanged(_ sender: NSPopUpButton) {
         guard let raw = sender.identifier?.rawValue, let key = DefaultsKey(rawValue: raw),
               let number = sender.selectedItem?.representedObject as? NSNumber else { return }
-        UserDefaults.standard.set(number.intValue, forKey: key.rawValue)
+        Defaults.store.set(number.intValue, forKey: key.rawValue)
     }
 
     /// Preferences.m:182-199, without the rich-text and HTML parts.
@@ -386,6 +413,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         guard window?.makeFirstResponder(nil) ?? true else { return }
         let manager = NSFontManager.shared
         manager.setSelectedFont(plainTextFont, isMultiple: false)
+        // Send changeFont: here, not up the responder chain: a size field's
+        // field editor would take it there (M6 review row 13). Cleared when
+        // the window closes.
+        manager.target = self
         manager.orderFrontFontPanel(self)
     }
 
@@ -406,6 +437,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
     /// Commits a typed size when the window closes without Return or Tab.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         sender.makeFirstResponder(nil)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        if NSFontManager.shared.target === self { NSFontManager.shared.target = nil }
     }
 
     func controlTextDidBeginEditing(_ notification: Notification) {

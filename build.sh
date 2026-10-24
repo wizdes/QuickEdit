@@ -4,6 +4,8 @@
 #   ./build.sh test                   shell tests (bench/tests/*.sh), Debug build + unit and UI tests
 #   ./build.sh unit                   shell tests, then unit tests only (works with the screen locked)
 #   ./build.sh only <T[/C[/m]]>...    just these tests, same checks (for reruns)
+#   ./build.sh speed                  the speed tests in an optimized build with their real
+#                                     limits (Select Line 200 ms both ways, Wrap to Page 300 ms)
 #   ./build.sh dist M<n> [--skip-tests]
 #                                     full tests, then Release build, zip to builds/QuickEdit-M<n>.zip,
 #                                     notarize when the keychain is open
@@ -80,10 +82,11 @@ release_build() {
 # read into a variable first: in a pipeline, `grep -q` quits at its first
 # match, an earlier stage can then die of SIGPIPE, and pipefail turns a
 # locked screen into "not locked".
+# The match is done in bash itself (no here-string, so no temp file).
 screen_locked() {
     local reg
-    reg="$(ioreg -n Root -d1 -a)" || die "ioreg failed; cannot tell whether the screen is locked"
-    grep -A1 CGSSessionScreenIsLocked <<<"$reg" | grep '<true/>' >/dev/null
+    reg="$(ioreg -n Root -d1 -a)" || die "ioreg failed; cannot tell whether the screen is locked (UI tests NOT possible)"
+    [[ "$reg" =~ CGSSessionScreenIsLocked\</key\>[[:space:]]*\<true/\> ]]
 }
 
 ui_tests_possible() {
@@ -91,9 +94,16 @@ ui_tests_possible() {
         echo "UI TESTS: NOT RUN. The screen is locked; unlock it and run again." >&2
         return 1
     fi
-    local status
-    status="$(perl -e 'alarm 20; exec @ARGV' automationmodetool </dev/null 2>&1 || true)"
-    if grep -q 'Automation Mode is disabled' <<<"$status" && grep -q 'requires user authentication' <<<"$status"; then
+    # Any error in this check means NOT possible (M6 review row 11): the
+    # tool must run, exit 0 and say something.
+    local status amt=0
+    status="$(perl -e 'alarm 20; exec @ARGV' automationmodetool </dev/null 2>&1)" || amt=$?
+    if [ "$amt" -ne 0 ] || [ -z "$status" ]; then
+        echo "UI TESTS: NOT RUN. automationmodetool failed (exit $amt); cannot tell whether Automation Mode can turn on." >&2
+        [ -z "$status" ] || echo "  $status" >&2
+        return 1
+    fi
+    if [[ "$status" == *"Automation Mode is disabled"* && "$status" == *"requires user authentication"* ]]; then
         echo "UI TESTS: NOT RUN. Automation Mode is off and needs a password to turn on." >&2
         echo "  To allow UI tests on this Mac, run once in a terminal:" >&2
         echo "  sudo automationmodetool enable-automationmode-without-authentication" >&2
@@ -132,6 +142,8 @@ make_fixtures() {
     printf 'caf\351\n' >"$dir/encodings/latin.txt"
     xattr -w com.apple.TextEncoding 'windows-1252;1280' "$dir/encodings/latin.txt"
     printf 'one\r\ntwo\r\n' >"$dir/encodings/crlf.txt"
+    # M3+M5 review row 9 (QuickEditUITests/M35ReviewUITests.swift).
+    printf 'abc\n' >"$dir/encodings/cancel.txt"
     # About 1 MB of numbered lines; the restoration test selects line 13000.
     awk 'BEGIN { for (i = 0; i < 26000; i++) printf "line %d of the restoration fixture\n", i }' \
         >"$dir/restore/restore-1mb.txt"
@@ -141,6 +153,12 @@ make_fixtures() {
 unlock_fixtures() {
     chflags -R nouchg "$1" 2>/dev/null || true
 }
+
+# Where run_tests builds, extra build settings, and its last log. `speed`
+# changes the first two.
+TEST_DERIVED="$DERIVED"
+TEST_SETTINGS=()
+TEST_LOG=""
 
 # Runs xcodebuild test and checks the result bundle: zero tests, any skipped
 # test, any failure, or any retried test is a failure.
@@ -152,9 +170,10 @@ run_tests() {
     results="$BUILD/test-results/$label-$stamp.xcresult"
     log="$BUILD/test-results/$label-$stamp.log"
     mkdir -p "$BUILD/test-results"
-    local args=(-project "$PROJECT" -scheme QuickEdit -configuration Debug -derivedDataPath "$DERIVED"
+    TEST_LOG="$log"
+    local args=(-project "$PROJECT" -scheme QuickEdit -configuration Debug -derivedDataPath "$TEST_DERIVED"
         -resultBundlePath "$results" -destination 'platform=macOS,arch=arm64'
-        CODE_SIGN_IDENTITY=- CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
+        CODE_SIGN_IDENTITY=- CURRENT_PROJECT_VERSION="$BUILD_NUMBER" ${TEST_SETTINGS[@]+"${TEST_SETTINGS[@]}"}
         )
     if [ -n "$only" ]; then
         for target in $only; do args+=("-only-testing:$target"); done
@@ -177,8 +196,8 @@ run_tests() {
     fi
     unlock_fixtures "$fixtures"
     # Stop any test host or UI-test app copy the run left behind.
-    pkill -f "$DERIVED/Build/Products/Debug/QuickEdit.app/Contents/MacOS/QuickEdit" 2>/dev/null || true
-    pkill -f "$DERIVED/Build/Products/Debug/QuickEditUITests-Runner.app/Contents/MacOS/QuickEditUITests-Runner" 2>/dev/null || true
+    pkill -f "$TEST_DERIVED/Build/Products/Debug/QuickEdit.app/Contents/MacOS/QuickEdit" 2>/dev/null || true
+    pkill -f "$TEST_DERIVED/Build/Products/Debug/QuickEditUITests-Runner.app/Contents/MacOS/QuickEditUITests-Runner" 2>/dev/null || true
     grep -E "^Test Case .*(failed|skipped)|: error: " "$log" | head -30 >&2 || true
 
     [ -d "$results" ] || die "no result bundle at $results (xcodebuild exit $status)"
@@ -270,6 +289,27 @@ case "$cmd" in
         run_shell_tests
         run_tests "QuickEditTests" unit
         ;;
+    speed)
+        # M3+M5 review row 7 (M4 row 6). The same speed tests the unit run
+        # has, built optimized: they then hold their real limits (the -Onone
+        # unit run only checks loose bounds). Debug with -O, so @testable
+        # import still works; its own derived data, removed afterwards.
+        mkdir -p "$BUILD"
+        TEST_DERIVED="$BUILD/DerivedData-speed-$$"
+        trap 'rm -rf "$TEST_DERIVED"' EXIT
+        TEST_SETTINGS=(SWIFT_OPTIMIZATION_LEVEL=-O SWIFT_COMPILATION_MODE=wholemodule ENABLE_HARDENED_RUNTIME=NO)
+        run_tests "QuickEditTests/LinePanelTests/testSelectLineOneMillionIn100MB QuickEditTests/LinePanelTests/testSelectLineBackNearlyOneMillionIn100MB QuickEditTests/PageModeTests/testTenMegabyteSwitchTime" speed
+        echo "SPEED (medians, limits in brackets):"
+        grep -E "^Select Line 1,000,000 in 100 MB" "$TEST_LOG" | head -1 | sed -E 's/.*(median [0-9.]+ ms).*/  Select Line forward, 1,000,000 lines of 100 MB: \1 [200 ms]/'
+        grep -E "^Select Line -999999 from the end" "$TEST_LOG" | head -1 | sed -E 's/.*(median [0-9.]+ ms).*/  Select Line backward, -999999 from the end: \1 [200 ms]/'
+        grep -E "^M5-TIMING" "$TEST_LOG" | head -1 | sed -E 's/.*switch to page ms: [^;]* median ([0-9.]+);.*/  Wrap to Page switch, 10 MB: median \1 ms [300 ms]/'
+        # The limits apply only when the tests saw an optimized build.
+        [ "$(grep -cE '^Select Line .*optimized \(-O\)' "$TEST_LOG")" -eq 2 ] \
+            || die "the Select Line tests did not run optimized (log: $TEST_LOG)"
+        grep -qE '^M5-TIMING.*optimized: true' "$TEST_LOG" \
+            || die "the Wrap to Page test did not run optimized (log: $TEST_LOG)"
+        echo "SPEED: PASS"
+        ;;
     uicheck)
         # Only the check that ./build.sh test runs before any UI test.
         ui_tests_possible || die "UI tests cannot run (reason above)"
@@ -310,6 +350,6 @@ case "$cmd" in
         echo "dist: $zip ($(stat -f %z "$zip") bytes)"
         ;;
     *)
-        die "unknown command '$cmd' (use: release, test, unit, dist M<n>)"
+        die "unknown command '$cmd' (use: release, test, unit, speed, dist M<n>)"
         ;;
 esac
