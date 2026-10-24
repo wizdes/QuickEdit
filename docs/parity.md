@@ -30,8 +30,8 @@ Each row is one behavior QuickEdit must match or deliberately change. Status is 
 ## M3: encodings and line endings
 | ID | Behavior | Ref | Status |
 | --- | --- | --- | --- |
-| P20 | Open panel shows "Plain Text Encoding" with Automatic first; start value from settings. | codemap 4.1 | todo |
-| P21 | Automatic order: `com.apple.TextEncoding` xattr, BOM, UTF-8, then fallback guess. Confirm each step against system TextEdit. | codemap 4.2 | todo |
+| P20 | Open panel shows "Plain Text Encoding" with Automatic first; start value from settings. | codemap 4.1 | same (unit tested; UI test not run yet) |
+| P21 | Automatic order: `com.apple.TextEncoding` xattr, BOM, UTF-8, then the system default C-string encoding (Mac Roman here); no guessing. | codemap 4.2, vote V2 | same: 34 of 34 fixtures match AppKit; malformed BOM shapes being matched (M6 review row 2) |
 | P22 | A chosen encoding that does not fit shows "could not be opened". | codemap 4.2 | todo |
 | P23 | Save panel encoding popup; encodings that cannot hold the text are disabled. | codemap 4.4 | todo |
 | P24 | Save writes the `com.apple.TextEncoding` xattr. | codemap 4.5 | todo |
@@ -65,9 +65,9 @@ Each row is one behavior QuickEdit must match or deliberately change. Status is 
 ## M6: settings
 | ID | Behavior | Ref | Status |
 | --- | --- | --- | --- |
-| P50 | Settings window (Cmd+,): New Document tab (size, font, wrap to page, spelling and substitution defaults). | codemap 3 | todo |
-| P51 | Open and Save tab: encodings for open and save, add .txt, autosave delay. | codemap 3 | todo |
-| P52 | Settings survive relaunch and apply to the next new window only. | codemap 3 note | todo |
+| P50 | Settings window (Cmd+,): New Document tab (size, font, wrap to page, spelling and substitution defaults). | codemap 3 | same; TextEdit's two tabs minus rich-text controls (unit tested, image checked) |
+| P51 | Open and Save tab: encodings for open and save, add .txt. (Autosave delay has no UI in TextEdit.) | codemap 3 | same (unit tested) |
+| P52 | Settings survive relaunch and apply to the next new window only. | codemap 3 note | same; note: like TextEdit, toggling Wrap to Page or reverting an open window picks up a new font for new typing |
 
 ## M7: printing and PDF
 | ID | Behavior | Ref | Status |
