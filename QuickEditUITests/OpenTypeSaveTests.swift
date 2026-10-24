@@ -19,9 +19,20 @@ final class OpenTypeSaveTests: QuickEditUITestCase {
     func testNewDocumentSaveAs() throws {
         let folder = try fixtureFolder("new-save")
         launch()
-        app.typeKey("n", modifierFlags: .command)
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
+        let windowsBefore = app.windows.count
+        app.typeKey("n", modifierFlags: .command)
+        // M1 review row 5: New must make a new window, not reuse the old one.
+        let more = NSPredicate { _, _ in self.app.windows.count == windowsBefore + 1 }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: more, object: nil)], timeout: 10),
+                       .completed, "Cmd+N did not add a window (had \(windowsBefore), now \(app.windows.count))")
+        let newWindow = app.windows.firstMatch // the front window is the new one
+        let firstTitle = app.windows.element(boundBy: 1).title
+        XCTAssertNotEqual(newWindow.title, firstTitle, "the front window is not a new document")
         app.typeText("hi")
+        XCTAssertEqual(newWindow.textViews.firstMatch.value as? String, "hi", "typing did not go to the new window")
+        XCTAssertEqual(app.windows.element(boundBy: 1).textViews.firstMatch.value as? String, "",
+                       "typing changed the first window")
         app.typeKey("s", modifierFlags: .command)
         fillSavePanel(name: "greeting", folder: folder)
         waitForBytes(folder.appendingPathComponent("greeting.txt"), Array("hi".utf8))

@@ -22,12 +22,33 @@ final class TextDocument: NSDocument {
     /// Format > Prevent Editing. Not saved in plain files.
     private(set) var preventsEditing = false
 
+    /// The untitled window made at launch (or by a Dock click with no
+    /// windows), not yet touched. Opening a file replaces it in place
+    /// (reference/apple/Document.m:525-543, DocumentController.m:153-277).
+    /// Any edit, a window move or resize, or a second document clears it.
+    var isTransient = false
+
+    /// A transient document can be replaced only while no sheet is open on it.
+    var isTransientAndCanBeReplaced: Bool {
+        isTransient && !windowControllers.contains { $0.window?.attachedSheet != nil }
+    }
+
     private struct State {
         var format = DecodedText.Format.newDocument
-        /// The text as it was when the current save started, taken on the main thread.
-        var saveSnapshot: String?
     }
     private nonisolated let state = Mutex(State())
+
+    #if DEBUG
+    /// Seams for unit tests only; compiled out of Release builds.
+    struct TestHooks {
+        /// Runs on the writing thread right after `unblockUserInteraction()`.
+        var afterUnblock: (@Sendable () -> Void)?
+        /// Runs at the start of `read(from:ofType:)`; the argument says whether
+        /// the read is on the main thread.
+        var onRead: (@Sendable (_ isMainThread: Bool) -> Void)?
+    }
+    nonisolated static let testHooks = Mutex(TestHooks())
+    #endif
 
     /// AppKit makes documents on a background thread when
     /// `canConcurrentlyReadDocuments` is true, so this init must not carry the
@@ -40,6 +61,12 @@ final class TextDocument: NSDocument {
 
     override nonisolated class func canConcurrentlyReadDocuments(ofType typeName: String) -> Bool { true }
 
+    /// An edit ends the transient state (Document.m:998-1004).
+    override func updateChangeCount(_ change: NSDocument.ChangeType) {
+        isTransient = false
+        super.updateChangeCount(change)
+    }
+
     override func makeWindowControllers() {
         addWindowController(DocumentWindowController(document: self))
     }
@@ -47,6 +74,9 @@ final class TextDocument: NSDocument {
     // MARK: Reading
 
     override nonisolated func read(from data: Data, ofType typeName: String) throws {
+        #if DEBUG
+        Self.testHooks.withLock { $0.onRead }?(Thread.isMainThread)
+        #endif
         let decoded: DecodedText
         do {
             decoded = try PlainTextIO.decode(data)
@@ -58,9 +88,16 @@ final class TextDocument: NSDocument {
             ])
         }
         let attributes = TextViewFactory.plainTextAttributes()
+        let layoutManagers = textStorage.layoutManagers
+        // Revert: empty the storage while the layout managers are still
+        // attached, so every text view moves its selection inside the new,
+        // empty text (reference/apple/Document.m:189). Without this a
+        // selection past the new end throws on the next keystroke.
+        if !layoutManagers.isEmpty {
+            textStorage.replaceCharacters(in: NSRange(location: 0, length: textStorage.length), with: "")
+        }
         // Detach layout managers (only present on revert) so the storage is
         // filled with no layout work, then put them back.
-        let layoutManagers = textStorage.layoutManagers
         for manager in layoutManagers { textStorage.removeLayoutManager(manager) }
         textStorage.beginEditing()
         textStorage.replaceCharacters(in: NSRange(location: 0, length: textStorage.length),
@@ -68,6 +105,39 @@ final class TextDocument: NSDocument {
         textStorage.endEditing()
         for manager in layoutManagers { textStorage.addLayoutManager(manager) }
         format = decoded.format
+    }
+
+    // MARK: Changes made by other apps
+
+    /// NSFilePresenter: the file changed on disk. Runs on a background queue.
+    override nonisolated func presentedItemDidChange() {
+        super.presentedItemDidChange()
+        let document = self
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { document.reloadAfterOutsideChange() }
+        }
+    }
+
+    /// Reloads a document that has no unsaved edits when another app changed
+    /// its file. With unsaved edits it does nothing: NSDocument shows its own
+    /// "changed by another application" sheet on the next save.
+    func reloadAfterOutsideChange() {
+        guard !isDocumentEdited, let url = fileURL, let type = fileType else { return }
+        let onDisk: Date?
+        do {
+            onDisk = try url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+        } catch {
+            // The file was moved or deleted; NSDocument tracks moves itself.
+            FileHandle.standardError.write(Data("QuickEdit: cannot read \(url.path) after an outside change: \(error)\n".utf8))
+            return
+        }
+        // Our own saves and an unchanged file need no reload.
+        if let onDisk, let known = fileModificationDate, onDisk <= known { return }
+        do {
+            try revert(toContentsOf: url, ofType: type)
+        } catch {
+            presentError(error)
+        }
     }
 
     // MARK: Writing
@@ -93,27 +163,19 @@ final class TextDocument: NSDocument {
         for controller in windowControllers {
             (controller as? DocumentWindowController)?.breakUndoCoalescing()
         }
-        let snapshot = String(textStorage.string) // an immutable copy, not the live NSString
-        state.withLock { $0.saveSnapshot = snapshot }
-        super.save(to: url, ofType: typeName, for: saveOperation) { error in
-            self.state.withLock { $0.saveSnapshot = nil }
-            completionHandler(error)
-        }
+        super.save(to: url, ofType: typeName, for: saveOperation, completionHandler: completionHandler)
     }
 
-    /// Runs on a background thread for async saves. Takes the snapshot made in
-    /// `save(to:...)`, lets the user type again, then encodes and writes.
+    /// Runs on a background thread for async saves. AppKit blocks user
+    /// interaction (the main thread waits) until `unblockUserInteraction()`,
+    /// so the storage cannot change while it is copied here. Then the user
+    /// can type again while the copy is encoded and written.
     override nonisolated func write(to url: URL, ofType typeName: String) throws {
-        let text: String
-        if let snapshot = state.withLock({ $0.saveSnapshot }) {
-            text = snapshot
-        } else {
-            // Paths that skip save(to:...) (such as a direct write in tests).
-            // AppKit blocks user interaction until unblockUserInteraction(), so
-            // the storage cannot change while it is copied.
-            text = String(textStorage.string)
-        }
+        let text = String(textStorage.string) // an immutable copy, not the live NSString
         unblockUserInteraction()
+        #if DEBUG
+        Self.testHooks.withLock { $0.afterUnblock }?()
+        #endif
         let data = try PlainTextIO.encode(text, as: format)
         try data.write(to: url, options: .atomic)
     }
@@ -142,25 +204,28 @@ final class TextDocument: NSDocument {
         accessory.addSubview(checkbox)
         savePanel.accessoryView = accessory
         applyExtensionChoice(checkbox.state == .on, to: savePanel)
+        if checkbox.state == .off {
+            // NSDocument put ".txt" on the suggested name; show the bare name
+            // instead, once, when the panel opens (Document.m:1291-1302).
+            var name: String?
+            if let fileURL { name = try? fileURL.resourceValues(forKeys: [.nameKey]).name }
+            savePanel.nameFieldStringValue = name ?? displayName ?? ""
+        }
         return true
     }
 
+    /// Changes only the allowed types, never the typed name (Document.m:737-741).
     @objc private func appendPlainTextExtensionChanged(_ sender: NSButton) {
-        guard let savePanel else { return }
+        guard let savePanel else {
+            FileHandle.standardError.write(Data("QuickEdit: .txt checkbox changed with no Save panel\n".utf8))
+            return
+        }
         applyExtensionChoice(sender.state == .on, to: savePanel)
     }
 
     private func applyExtensionChoice(_ addsExtension: Bool, to savePanel: NSSavePanel) {
-        if addsExtension {
-            savePanel.allowedContentTypes = [.plainText]
-            savePanel.allowsOtherFileTypes = true
-        } else {
-            savePanel.allowedContentTypes = []
-            savePanel.allowsOtherFileTypes = true
-            // With no allowed types the panel adds no extension; show the bare name.
-            let name = fileURL?.lastPathComponent ?? displayName ?? ""
-            savePanel.nameFieldStringValue = name
-        }
+        savePanel.allowedContentTypes = addsExtension ? [.plainText] : []
+        savePanel.allowsOtherFileTypes = addsExtension
     }
 
     // MARK: Prevent Editing

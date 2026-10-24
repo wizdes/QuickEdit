@@ -1,14 +1,25 @@
 import AppKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    /// `-QEOpenPath <path>`: open this file at launch. For tests only (Doc B section 8).
-    private let testOpenPath = UserDefaults.standard.string(forKey: "QEOpenPath")
+    /// `-QEOpenPath <path>`: open this file at launch. For tests only (Doc B
+    /// section 8). Read from the launch arguments only, never from saved user
+    /// defaults, so a stray `defaults write` cannot change how the app starts.
+    let testOpenPath = AppDelegate.testOpenPath(in: ProcessInfo.processInfo.arguments)
+
+    /// The value after `-QEOpenPath` in `arguments`, if any.
+    static func testOpenPath(in arguments: [String]) -> String? {
+        guard let index = arguments.firstIndex(of: "-QEOpenPath"), index + 1 < arguments.count else { return nil }
+        return arguments[index + 1]
+    }
 
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
         testOpenPath == nil
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        #if DEBUG
+        TestHooks.start(arguments: ProcessInfo.processInfo.arguments)
+        #endif
         guard let testOpenPath else { return }
         let url = URL(fileURLWithPath: (testOpenPath as NSString).expandingTildeInPath)
         NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { _, _, error in

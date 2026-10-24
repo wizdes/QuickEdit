@@ -14,7 +14,10 @@ BIN="$ROOT/bench/bin/launchbench"
 mkdir -p "$OUT" "$ROOT/bench/bin"
 
 [ -x "$APP/Contents/MacOS/QuickEdit" ] || { echo "FAILED: $APP missing; run ./build.sh first" >&2; exit 1; }
-if ioreg -n Root -d1 -a | grep -A1 CGSSessionScreenIsLocked | grep -q '<true/>'; then
+# Read ioreg into a variable first: under pipefail, `grep -q` quitting early
+# can SIGPIPE an earlier stage and turn "locked" into "not locked".
+reg="$(ioreg -n Root -d1 -a)" || { echo "FAILED: ioreg failed; cannot tell whether the screen is locked" >&2; exit 1; }
+if grep -A1 CGSSessionScreenIsLocked <<<"$reg" | grep '<true/>' >/dev/null; then
     echo "FAILED: the screen is locked; launch timing needs an unlocked screen" >&2
     exit 1
 fi
@@ -41,6 +44,15 @@ fi
 } > "$OUT/state.txt"
 cat "$OUT/state.txt"
 
+# launchbench exits 1 on missing samples, missing ready stamps or a failed
+# CSV write; pipefail carries that exit through tee.
 "$BIN" --runs "$RUNS" --warmups 2 --csv "$OUT/results.csv" --ready-log QuickEdit "${targets[@]}" \
     2>&1 | tee "$OUT/bench.log"
-echo "results: $OUT/results.csv"
+# Belt and braces: the CSV must exist with a row per target and metric.
+csv="$OUT/results.csv"
+[ -s "$csv" ] || { echo "FAILED: no results CSV at $csv" >&2; exit 1; }
+grep -q '^QuickEdit,keystroke_ready,' "$csv" || { echo "FAILED: no QuickEdit keystroke_ready row in $csv" >&2; exit 1; }
+for t in "${targets[@]}"; do
+    grep -q "^${t%%=*},window_visible," "$csv" || { echo "FAILED: no ${t%%=*} window_visible row in $csv" >&2; exit 1; }
+done
+echo "results: $csv"

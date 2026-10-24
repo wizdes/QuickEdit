@@ -35,11 +35,18 @@ class QuickEditUITestCase: XCTestCase {
     }
 
     /// Launches QuickEdit the way Doc B section 8 says, optionally opening a file.
+    /// `keepsWindows` is for the restoration test only: it reads and writes
+    /// saved window state (`-ApplePersistenceIgnoreState NO`,
+    /// `-NSQuitAlwaysKeepsWindows YES`).
     @discardableResult
-    func launch(opening path: String? = nil) -> XCUIApplication {
+    func launch(opening path: String? = nil, keepsWindows: Bool = false,
+                extraArguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-ApplePersistenceIgnoreState", "YES", "-NSQuitAlwaysKeepsWindows", "NO"]
+        app.launchArguments = keepsWindows
+            ? ["-ApplePersistenceIgnoreState", "NO", "-NSQuitAlwaysKeepsWindows", "YES"]
+            : ["-ApplePersistenceIgnoreState", "YES", "-NSQuitAlwaysKeepsWindows", "NO"]
         if let path { app.launchArguments += ["-QEOpenPath", path] }
+        app.launchArguments += extraArguments
         app.launch()
         self.app = app
         XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10), "no window after launch")
@@ -73,21 +80,27 @@ class QuickEditUITestCase: XCTestCase {
         return sheet
     }
 
-    /// In an open Save panel: optionally set the ".txt" checkbox, type the name,
-    /// go to `folder` with Cmd+Shift+G, and press Save.
+    /// In an open Save panel: type the name, then optionally set the ".txt"
+    /// checkbox, go to `folder` with Cmd+Shift+G, and press Save. The name is
+    /// typed BEFORE the checkbox changes, as a person does, so a checkbox that
+    /// overwrites the typed name fails the test (M1 review row 3).
     func fillSavePanel(name: String, folder: URL, addTxtExtension: Bool? = nil,
                        file: StaticString = #filePath, line: UInt = #line) {
         let sheet = savePanel(file: file, line: line)
         if let addTxtExtension {
+            let nameField = sheet.textFields.firstMatch
+            nameField.click()
+            nameField.typeKey("a", modifierFlags: .command)
+            app.typeText(name)
             let checkbox = sheet.checkBoxes["If no extension is provided, use \u{201C}.txt\u{201D}."]
             XCTAssertTrue(checkbox.waitForExistence(timeout: 5), "no .txt checkbox", file: file, line: line)
             let isOn = (checkbox.value as? Int ?? (checkbox.value as? NSNumber)?.intValue ?? 0) == 1
             if isOn != addTxtExtension { checkbox.click() }
-            let nameField = sheet.textFields.firstMatch
-            nameField.click()
-            nameField.typeKey("a", modifierFlags: .command)
+            XCTAssertEqual(nameField.value as? String, name, "the .txt checkbox changed the typed name",
+                           file: file, line: line)
+        } else {
+            app.typeText(name)
         }
-        app.typeText(name)
         app.typeKey("g", modifierFlags: [.command, .shift])
         let goTo = sheet.sheets.firstMatch.exists ? sheet.sheets.firstMatch : sheet
         _ = goTo.textFields.firstMatch.waitForExistence(timeout: 5)
@@ -105,4 +118,27 @@ class QuickEditUITestCase: XCTestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
     }
+
+    /// Waits until `condition` holds, for up to `timeout` seconds.
+    func waitUntil(_ timeout: TimeInterval, _ message: @autoclosure () -> String,
+                   file: StaticString = #filePath, line: UInt = #line, _ condition: @escaping () -> Bool) {
+        let predicate = NSPredicate { _, _ in condition() }
+        let result = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: nil)],
+                                    timeout: timeout)
+        XCTAssertEqual(result, .completed, message(), file: file, line: line)
+    }
+
+    /// Chooses File > <title> (or a nested item) with the mouse.
+    func chooseMenu(_ path: String...) {
+        var element: XCUIElement = app.menuBars.menuBarItems[path[0]]
+        element.click()
+        for title in path.dropFirst() {
+            element = element.menuItems[title]
+            XCTAssertTrue(element.waitForExistence(timeout: 5), "no menu item \(title)")
+            element.click()
+        }
+    }
+
+    /// Bytes of a fixture file, or nil.
+    func bytes(_ url: URL) -> [UInt8]? { (try? Data(contentsOf: url)).map(Array.init) }
 }

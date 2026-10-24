@@ -157,4 +157,64 @@ final class MainMenuTests: XCTestCase {
         XCTAssertEqual(controller.textView.frame.width, expected.width, accuracy: 0.5)
         controller.close()
     }
+    // MARK: M2 n1: the File menu for document life
+
+    /// Every File item in order: title, key, action, and whether it is an
+    /// Option-key alternate. Save All stays: TextEdit 1.9 has it
+    /// (reference/apple/Base.lproj/Edit.nib/designable.nib, item "Save All").
+    func testFileMenuItemsInOrder() throws {
+        let file = try menu("File", in: MainMenu.build())
+        let rows = file.items.map { item -> String in
+            if item.isSeparatorItem { return "----" }
+            let m = item.keyEquivalentModifierMask.intersection(.deviceIndependentFlagsMask)
+            let key = item.keyEquivalent.isEmpty ? "" : (m.contains(.option) ? "Opt+" : "")
+                + (m.contains(.shift) ? "Shift+" : "") + (m.contains(.command) ? "Cmd+" : "") + item.keyEquivalent
+            let action = item.submenu != nil ? "submenu" : (item.action.map(NSStringFromSelector) ?? "")
+            return "\(item.title)|\(key)|\(action)\(item.isAlternate ? "|alternate" : "")"
+        }
+        XCTAssertEqual(rows, [
+            "New|Cmd+n|newDocument:",
+            "Open\u{2026}|Cmd+o|openDocument:",
+            "Open Recent||submenu",
+            "----",
+            "Close|Cmd+w|performClose:",
+            "Save|Cmd+s|saveDocument:",
+            "Duplicate|Shift+Cmd+s|duplicateDocument:",
+            "Save As\u{2026}|Opt+Shift+Cmd+s|saveDocumentAs:|alternate",
+            "Rename\u{2026}||renameDocument:",
+            "Move To\u{2026}||moveDocument:",
+            "Save All||saveAllDocuments:",
+            "Revert to Saved||revertDocumentToSaved:",
+        ])
+    }
+
+    /// AppKit fills Open Recent in the app's real menu bar.
+    func testOpenRecentFillsFromRecentDocuments() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("recent-\(UUID().uuidString).txt")
+        try Data("r".utf8).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let controller = NSDocumentController.shared
+        let saved = controller.recentDocumentURLs
+        controller.noteNewRecentDocumentURL(url)
+        defer {
+            controller.clearRecentDocuments(nil)
+            for old in saved.reversed() { controller.noteNewRecentDocumentURL(old) }
+        }
+        let bar = try XCTUnwrap(NSApp.mainMenu)
+        let recent = try XCTUnwrap(bar.item(withTitle: "File")?.submenu?.item(withTitle: "Open Recent")?.submenu)
+        // AppKit attaches its own delegate to the menu it recognises as Open
+        // Recent, and fills it in the private updateMenu:withEvent:withFlags:
+        // when the menu opens. Call that the way menu tracking does. If a
+        // macOS update renames it, this test fails loudly (not silently);
+        // OpenRecentUITests checks the same thing through the real menu.
+        let delegate = try XCTUnwrap(recent.delegate as? NSObject, "AppKit did not take over Open Recent")
+        let update = NSSelectorFromString("updateMenu:withEvent:withFlags:")
+        XCTAssertTrue(delegate.responds(to: update), "AppKit's Open Recent delegate changed: \(type(of: delegate))")
+        typealias UpdateFn = @convention(c) (AnyObject, Selector, NSMenu, NSEvent?, UInt) -> Void
+        let fn = unsafeBitCast(delegate.method(for: update), to: UpdateFn.self)
+        fn(delegate, update, recent, nil, 0)
+        let titles = recent.items.map(\.title)
+        XCTAssertTrue(titles.contains(url.lastPathComponent), "Open Recent items: \(titles)")
+        XCTAssertEqual(recent.items.last?.action, #selector(NSDocumentController.clearRecentDocuments(_:)))
+    }
 }

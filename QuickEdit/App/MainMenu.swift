@@ -52,8 +52,14 @@ enum MainMenu {
         menu.addItem(item("Close", #selector(NSWindow.performClose(_:)), "w"))
         menu.addItem(item("Save", #selector(NSDocument.save(_:)), "s"))
         menu.addItem(item("Duplicate", #selector(NSDocument.duplicate(_:)), "s", [.command, .shift]))
+        // Hold Option over Duplicate to get Save As…, as in TextEdit on macOS 27.
+        let saveAs = item("Save As\u{2026}", #selector(NSDocument.saveAs(_:)), "s", [.command, .shift, .option])
+        saveAs.isAlternate = true
+        menu.addItem(saveAs)
         menu.addItem(item("Rename\u{2026}", #selector(NSDocument.rename(_:))))
         menu.addItem(item("Move To\u{2026}", #selector(NSDocument.move(_:))))
+        // TextEdit 1.9 has Save All (Edit.nib, after Save As…); it stays.
+        menu.addItem(item("Save All", #selector(NSDocumentController.saveAllDocuments(_:))))
         // With autosavesInPlace, AppKit turns this item into the "Revert To" submenu.
         menu.addItem(item("Revert to Saved", #selector(NSDocument.revertToSaved(_:))))
         return menu

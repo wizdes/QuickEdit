@@ -19,6 +19,7 @@
 //   SAME app launched blank against the same app launched with a 5GB file as
 //   its argument, and both need their ready stamp.
 //   --arg passes a launch argument to one target (repeat for more than one).
+//   --timeout S: seconds to wait for a window per launch (default 30).
 //   Two targets may share a bundle id — rounds are strictly sequential and
 //   each target is quit before the next runs, so they never overlap.
 
@@ -47,16 +48,19 @@ final class Target {
     func running() -> [NSRunningApplication] {
         NSRunningApplication.runningApplications(withBundleIdentifier: bid)
     }
-    func quitAndWait(_ deadline: Double = 12.0) {
-        for a in running() { a.terminate() }
+    /// Quits only the instance this harness launched (M1 review row 9): a
+    /// copy the user opens during the bench is left alone.
+    func quitAndWait(pid: Int32, _ deadline: Double = 12.0) {
+        guard pid > 0, let app = NSRunningApplication(processIdentifier: pid) else { return }
+        app.terminate()
         let s = nowNs()
-        while !running().isEmpty && ms(s, nowNs()) < deadline * 1000 { usleep(20_000) }
-        for a in running() {
-            eprint("  ! \(bid) ignored terminate; SIGKILL \(a.processIdentifier)")
-            a.forceTerminate()
+        while !app.isTerminated && ms(s, nowNs()) < deadline * 1000 { usleep(20_000) }
+        if !app.isTerminated {
+            eprint("  ! \(bid) ignored terminate; SIGKILL \(pid)")
+            app.forceTerminate()
         }
         let s2 = nowNs()
-        while !running().isEmpty && ms(s2, nowNs()) < 5000 { usleep(20_000) }
+        while !app.isTerminated && ms(s2, nowNs()) < 5000 { usleep(20_000) }
     }
 }
 
@@ -77,6 +81,7 @@ while i < argv.count {
     case "--hold": holdS = Double(next())!
     case "--settle": settleS = Double(next())!
     case "--poll-us": pollUs = UInt32(next())!
+    case "--timeout": timeoutS = Double(next())!
     case "--csv": csvPath = next()
     case "--ready-log": readyLogLabels.insert(next())
     case "--arg":
@@ -115,6 +120,9 @@ struct RunResult {
     var windowMs: Double
     var readyMs: Double? // click -> keystroke-ready (ready-log target only)
 }
+
+/// The process the last oneRun launched, so only it gets quit.
+var lastLaunchedPID: Int32 = -1
 
 func oneRun(_ t: Target) -> RunResult? {
     let cfg = NSWorkspace.OpenConfiguration()
@@ -159,6 +167,7 @@ func oneRun(_ t: Target) -> RunResult? {
         usleep(pollUs)
     }
     _ = sem.wait(timeout: .now() + 5)
+    lastLaunchedPID = lpid > 0 ? lpid : pid
     if t1 == 0 { return nil }
     var result = RunResult(windowMs: ms(t0, t1), readyMs: nil)
 
@@ -185,11 +194,15 @@ func oneRun(_ t: Target) -> RunResult? {
 eprint("interleaved: \(targets.map(\.label).joined(separator: ", "))")
 eprint(String(format: "warmups=%d runs=%d misfire<%.0fms load1=%.2f",
               warmups, runs, misfireThresholdMs, loadAvg()))
-for t in targets {
-    if !t.running().isEmpty {
-        eprint("NOTE: \(t.label) was already running at bench start — quitting it; its restore state is whatever it was.")
+// Never quit an app the user already has open (M1 review row 9): refuse.
+let alreadyRunning = targets.filter { !$0.running().isEmpty }
+if !alreadyRunning.isEmpty {
+    for t in alreadyRunning {
+        eprint("FAILED: \(t.label) (\(t.bid)) is already running, pid(s) "
+               + t.running().map { String($0.processIdentifier) }.joined(separator: ", ")
+               + ". Quit it yourself, then run the bench again.")
     }
-    t.quitAndWait()
+    exit(1)
 }
 Thread.sleep(forTimeInterval: settleS)
 
@@ -232,7 +245,8 @@ func benchRound(_ round: Int, label: String, measured: Bool) {
             row += "  \(t.label)=TIMEOUT"
         }
         Thread.sleep(forTimeInterval: holdS)
-        t.quitAndWait()
+        t.quitAndWait(pid: lastLaunchedPID)
+        lastLaunchedPID = -1
         Thread.sleep(forTimeInterval: settleS)
     }
     eprint(row + String(format: "   [load %.2f]", loadAvg()))
@@ -248,8 +262,14 @@ while extra < 8 && targets.contains(where: { $0.windowSamples.count < runs }) {
     extra += 1
     benchRound(warmups + runs + extra, label: "[extra]", measured: true)
 }
-if targets.contains(where: { $0.windowSamples.count < runs }) {
-    eprint("WARNING: sample count below n=\(runs) after \(extra) replenish rounds — reported n is honest, see CSV")
+// Every problem below makes the run fail (exit 1) after the results print
+// (M1 review row 10): missing samples, missing ready stamps, no CSV.
+var problems: [String] = []
+for t in targets where t.windowSamples.count < runs {
+    problems.append("\(t.label): \(t.windowSamples.count) window samples, below n=\(runs) after \(extra) replenish rounds")
+}
+for t in targets where wantsReady(t) && (t.readyMissing > 0 || t.readySamples.count < t.windowSamples.count) {
+    problems.append("\(t.label): ready stamp missing in \(t.readyMissing) run(s) (\(t.readySamples.count) of \(t.windowSamples.count))")
 }
 
 func stats(_ samples: [Double]) -> (n: Int, med: Double, min: Double, max: Double, mean: Double, sd: Double)? {
@@ -281,5 +301,15 @@ for t in targets {
     }
 }
 print(out, terminator: "")
-if let c = csvPath { try? out.write(toFile: c, atomically: true, encoding: .utf8) }
+if let c = csvPath {
+    do {
+        try out.write(toFile: c, atomically: true, encoding: .utf8)
+    } catch {
+        problems.append("CSV write to \(c) failed: \(error.localizedDescription)")
+    }
+}
 try? FileManager.default.removeItem(atPath: readyLogPath)
+if !problems.isEmpty {
+    for p in problems { eprint("FAILED: \(p)") }
+    exit(1)
+}

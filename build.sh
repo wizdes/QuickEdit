@@ -75,9 +75,19 @@ release_build() {
 # XCUITest must turn on macOS Automation Mode. When the Mac needs a password
 # for that and nobody types it, the runner times out AND leaves testmanagerd
 # stuck, so every later test run hangs. Check first instead.
+# True when the login screen is locked. IOConsoleLocked can say No while the
+# screen is locked; CGSSessionScreenIsLocked is reliable. The ioreg output is
+# read into a variable first: in a pipeline, `grep -q` quits at its first
+# match, an earlier stage can then die of SIGPIPE, and pipefail turns a
+# locked screen into "not locked".
+screen_locked() {
+    local reg
+    reg="$(ioreg -n Root -d1 -a)" || die "ioreg failed; cannot tell whether the screen is locked"
+    grep -A1 CGSSessionScreenIsLocked <<<"$reg" | grep '<true/>' >/dev/null
+}
+
 ui_tests_possible() {
-    # IOConsoleLocked can say No while the screen is locked; this key is reliable.
-    if ioreg -n Root -d1 -a | grep -A1 CGSSessionScreenIsLocked | grep -q '<true/>'; then
+    if screen_locked; then
         echo "UI TESTS: NOT RUN. The screen is locked; unlock it and run again." >&2
         return 1
     fi
@@ -95,15 +105,35 @@ ui_tests_possible() {
 # Files and folders the UI tests read and save into (see QuickEditUITests/UITestSupport.swift).
 make_fixtures() {
     local dir="$1"
+    unlock_fixtures "$dir"
     rm -rf "$dir"
     mkdir -p "$dir"
     local name
-    for name in open-type-save new-save boundary ext-on ext-off ext-md open-panel shots; do
+    for name in open-type-save new-save boundary ext-on ext-off ext-md open-panel shots \
+        transient external-clean external-edited locked close-named close-untitled \
+        rename-move rename-move/dest restore recent cascade; do
         mkdir -p "$dir/$name"
     done
     printf 'abc\n' >"$dir/open-type-save/hello.txt"
     printf 'start\n' >"$dir/boundary/boundary.txt"
     printf 'opened by the Open panel\n' >"$dir/open-panel/openme.txt"
+    # M2 document life (QuickEditUITests/DocumentLifeTests.swift and friends).
+    printf 'replaces the untitled window\n' >"$dir/transient/replace.txt"
+    printf 'before\n' >"$dir/external-clean/outside.txt"
+    printf 'before\n' >"$dir/external-edited/outside.txt"
+    printf 'locked text\n' >"$dir/locked/locked.txt"
+    chflags uchg "$dir/locked/locked.txt"
+    printf 'named\n' >"$dir/close-named/named.txt"
+    printf 'move me\n' >"$dir/rename-move/original.txt"
+    printf 'recent\n' >"$dir/recent/recent.txt"
+    # About 1 MB of numbered lines; the restoration test selects line 13000.
+    awk 'BEGIN { for (i = 0; i < 26000; i++) printf "line %d of the restoration fixture\n", i }' \
+        >"$dir/restore/restore-1mb.txt"
+}
+
+# Locked fixtures (chflags uchg) cannot be deleted; unlock them after a run.
+unlock_fixtures() {
+    chflags -R nouchg "$1" 2>/dev/null || true
 }
 
 # Runs xcodebuild test and checks the result bundle: zero tests, any skipped
@@ -139,6 +169,7 @@ run_tests() {
     if [ "$status" -eq 142 ]; then
         echo "xcodebuild test hit the ${QE_TEST_TIMEOUT:-1200} s limit and was stopped" >&2
     fi
+    unlock_fixtures "$fixtures"
     # Stop any test host or UI-test app copy the run left behind.
     pkill -f "$DERIVED/Build/Products/Debug/QuickEdit.app/Contents/MacOS/QuickEdit" 2>/dev/null || true
     pkill -f "$DERIVED/Build/Products/Debug/QuickEditUITests-Runner.app/Contents/MacOS/QuickEditUITests-Runner" 2>/dev/null || true
@@ -202,6 +233,11 @@ case "$cmd" in
     unit)
         run_tests "QuickEditTests" unit
         ;;
+    uicheck)
+        # Only the check that ./build.sh test runs before any UI test.
+        ui_tests_possible || die "UI tests cannot run (reason above)"
+        echo "UI TESTS: possible (screen unlocked, Automation Mode can turn on)"
+        ;;
     only)
         shift
         [ "$#" -gt 0 ] || die "usage: ./build.sh only <Target[/Class[/method]]>..."
@@ -212,7 +248,10 @@ case "$cmd" in
         milestone="${2:-}"
         [[ "$milestone" =~ ^M[0-9]+$ ]] || die "usage: ./build.sh dist M<n> [--skip-tests]"
         if [ "${3:-}" = "--skip-tests" ]; then
-            echo "WARNING: --skip-tests given; packaging WITHOUT running the tests (root use only)" >&2
+            SKIP_WARNING="WARNING: --skip-tests given; packaging WITHOUT running the tests (root use only)"
+            echo "$SKIP_WARNING" >&2
+            # Repeat it as the last line, whether packaging works or fails.
+            trap 'echo "$SKIP_WARNING" >&2' EXIT
         else
             ui_tests_possible || die "UI tests cannot run here (reason above); refusing to package"
             run_tests "" all
