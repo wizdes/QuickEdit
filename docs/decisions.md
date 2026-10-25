@@ -4,6 +4,7 @@ Critical questions go to Astra and Fable. The option with the most votes wins; r
 
 ## User decisions
 
+- U4 (2026-10-25): the Settings > Keyboard tab is mockup A, one flat table with a header row per menu (`docs/mockups/M9-keyboard.html`). This overrides vote V4 (B). Kept from the V4 changes because they fit A: the clash message stays on screen under the table and VoiceOver announces it; Edit's submenus are one level; recording and per-row reset work from the keyboard with spoken labels naming the command; the button is "Restore Keyboard Defaults". Not taken: search and folding groups (A has neither).
 - U3 (2026-10-25): skip AppleScript and QuickEdit's own Services in M9. The Services menu that macOS adds by itself stays.
 
 ## Votes
@@ -45,7 +46,7 @@ Result: B, 2 of 2. Read-only alone does not pass done-test 4; the open path must
 Options (mockups: three rendered windows, 440 pt wide): A, one flat table at 11 pt with a header row per menu; B, a search field over an outline with one group per menu, 13 pt, 24 pt rows; C, a menu pop-up that shows one menu's commands, 32 pt rows with key caps.
 - Fable: B. Search by name or by key reaches any of 59 commands fastest; NSOutlineView plus NSSearchField is stock AppKit and works with VoiceOver; C's key caps are custom drawing and the riskiest build.
 - Astra: B. Search does not need the menu name; 13 pt and 24 pt rows fit 440 pt; more work than A, worth it for 59 commands.
-Result: B, 2 of 2. Changes both or one asked for, all taken: no popover, the clash message stays on screen under the list and VoiceOver announces it without moving focus (both); groups start expanded and search shows matches flat (Fable); Edit's submenus become one level, as "Find > Find..." rows (Fable); search also matches typed key names such as "cmd+shift+p" (Astra); recording and per-row reset work from the keyboard with spoken labels naming the command (Astra); the button is "Restore Keyboard Defaults" (Astra).
+Result: B, 2 of 2, then overridden by the user (U4: A). Changes both or one asked for, all taken: no popover, the clash message stays on screen under the list and VoiceOver announces it without moving focus (both); groups start expanded and search shows matches flat (Fable); Edit's submenus become one level, as "Find > Find..." rows (Fable); search also matches typed key names such as "cmd+shift+p" (Astra); recording and per-row reset work from the keyboard with spoken labels naming the command (Astra); the button is "Restore Keyboard Defaults" (Astra).
 
 ## Choices to check
 - Reference build: the Apple copy (version 309) is the base, not zadr (285), because it is newer and has autosave, versions and Base.lproj. zadr is kept for its ARC changes.
