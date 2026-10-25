@@ -67,6 +67,9 @@ final class TextDocument: NSDocument {
     private var ownPrintInfo: NSPrintInfo?
     /// The PDF Save panel is open: a second Print… or Export waits (item 6).
     private(set) var isPDFPanelOpen = false
+    /// A large PDF being written off the main thread (M8 n6); a second
+    /// Print… or Export waits for it too.
+    private(set) var pdfJob: PDFJob?
     /// Tests: replace the PDF Save panel and the PDF writer.
     var pdfPanelRunner: PDFPanelRunner?
     var pdfWriter: ((URL, PDFOptions) throws -> Void)?
@@ -107,6 +110,8 @@ final class TextDocument: NSDocument {
         /// The format the running save writes, when the Save panel chose a
         /// new encoding; nil means the document's own format.
         var pendingWriteFormat: DecodedText.Format?
+        /// Bytes of the file as last read; 0 for a new document.
+        var readByteCount = 0
     }
     private nonisolated let state = Mutex(State())
 
@@ -143,6 +148,8 @@ final class TextDocument: NSDocument {
         /// Runs with the temporary PDF file after it is drawn and before it
         /// is checked and moved, so a test can see its folder or remove it.
         var pdfTemporaryFile: (@Sendable (URL) -> Void)?
+        /// Runs with the private folder a PDF is drawn in, when it is made.
+        var pdfTemporaryFolder: (@Sendable (URL) -> Void)?
     }
     nonisolated static let testHooks = Mutex(TestHooks())
     #endif
@@ -177,6 +184,17 @@ final class TextDocument: NSDocument {
 
     // MARK: Reading
 
+    /// Files bigger than this many bytes open in large-file mode (M8 n2):
+    /// the window turns off spelling, grammar, data detectors and the
+    /// substitutions, which work on the text as it is typed, and says so in
+    /// its title. 50 MB is the M8 brief's starting point. Tests change it.
+    nonisolated(unsafe) static var largeFileThreshold = 50 * 1024 * 1024
+
+    /// The file this document was read from is over `largeFileThreshold`.
+    var isLargeFile: Bool {
+        state.withLock { $0.readByteCount } > Self.largeFileThreshold
+    }
+
     /// The `PlainTextEncoding` default: nil means Automatic.
     nonisolated static func defaultOpenEncoding() -> String.Encoding? {
         let raw = (Defaults.store.object(forKey: DefaultsKey.plainTextEncoding.rawValue) as? NSNumber)?.intValue
@@ -191,13 +209,21 @@ final class TextDocument: NSDocument {
         #if DEBUG
         Self.testHooks.withLock { $0.onRead }?(Thread.isMainThread)
         #endif
-        let data = try Data(contentsOf: url)
+        let signpost = Signposts.beginRead()
+        defer { Signposts.endRead(signpost) }
+        // Mapped, not copied (M8 n2): the decode reads the file's pages
+        // straight from the file cache, so a 100 MB file does not first
+        // take 100 MB of memory as a copy of its bytes.
+        let data = try Data(contentsOf: url, options: .mappedIfSafe)
+        state.withLock { $0.readByteCount = data.count }
         switch DocumentController.takeOpenPanelEncoding(for: url) {
         case .some(.some(let chosen)): state.withLock { $0.openChoice = .encoding(chosen) }
         case .some(.none): state.withLock { $0.openChoice = .automatic }
         case .none: break // not from the Open panel: keep this document's choice
         }
-        try load(decode(data, url: url, preferred: preferredEncoding()))
+        let decoded = try decode(data, url: url, preferred: preferredEncoding())
+        Signposts.mark(.decodeEnd)
+        load(decoded)
     }
 
     override nonisolated func read(from data: Data, ofType typeName: String) throws {
@@ -303,6 +329,9 @@ final class TextDocument: NSDocument {
         }
         undecodableOnDisk = nil
         fileModificationDate = onDisk
+        // The new bytes decide large-file mode (M8 review row 2).
+        state.withLock { $0.readByteCount = data.count }
+        defer { updateLargeFileMode() }
         // UTF-16 code units, not Swift's canonical equivalence: "é" and
         // "e" + U+0301 are different text on disk (M3+M5 review row 4).
         guard !decoded.text.utf16.elementsEqual(textStorage.string.utf16) else {
@@ -318,6 +347,20 @@ final class TextDocument: NSDocument {
         undoManager?.removeAllActions()
         updateChangeCount(.changeCleared)
         for (window, place) in zip(windows, places) { window.restore(place) }
+    }
+
+    /// Revert reads the file again (`read(from:ofType:)` records its
+    /// size); the windows then follow its large-file mode (M8 review row 2).
+    override func revert(toContentsOf url: URL, ofType typeName: String) throws {
+        defer { updateLargeFileMode() }
+        try super.revert(toContentsOf: url, ofType: typeName)
+    }
+
+    /// Every window turns its checks and title note on or off to match `isLargeFile`.
+    private func updateLargeFileMode() {
+        for controller in windowControllers {
+            (controller as? DocumentWindowController)?.applyLargeFileMode()
+        }
     }
 
     // MARK: Writing
@@ -668,7 +711,7 @@ final class TextDocument: NSDocument {
 
     override func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(printToPDF(_:)) || menuItem.action == #selector(saveToPDF(_:)) {
-            return !isPDFPanelOpen
+            return !isPDFPanelOpen && pdfJob == nil
         }
         if menuItem.action == #selector(toggleReadOnly(_:)) {
             menuItem.title = preventsEditing ? "Allow Editing" : "Prevent Editing"
@@ -742,7 +785,7 @@ extension TextDocument {
     /// While the panel is open, another request opens nothing (and reports
     /// false). `done` hears whether a PDF was written.
     private func runPDFSavePanel(done: ((Bool) -> Void)? = nil) {
-        guard !isPDFPanelOpen else {
+        guard !isPDFPanelOpen, pdfJob == nil else {
             done?(false)
             return
         }
@@ -760,6 +803,13 @@ extension TextDocument {
                 done?(false)
                 return
             }
+            if self.pdfWriter == nil, self.textStorage.length > Self.backgroundPDFThreshold {
+                self.startPDFWrite(to: url, options: accessory.options) { error in
+                    done?(error == nil)
+                    if let error { self.presentPDFError(error) }
+                }
+                return
+            }
             do {
                 if let pdfWriter = self.pdfWriter {
                     try pdfWriter(url, accessory.options)
@@ -769,11 +819,7 @@ extension TextDocument {
                 done?(true)
             } catch {
                 done?(false)
-                if let window = self.windowControllers.first?.window {
-                    self.presentError(error, modalFor: window, delegate: nil, didPresent: nil, contextInfo: nil)
-                } else {
-                    self.presentError(error)
-                }
+                self.presentPDFError(error)
             }
         }
         if let pdfPanelRunner {
@@ -787,18 +833,109 @@ extension TextDocument {
         }
     }
 
+    /// A failed PDF write as an alert on the window; Cancel shows nothing.
+    private func presentPDFError(_ error: Error) {
+        if (error as? CocoaError)?.code == .userCancelled { return }
+        if let window = windowControllers.first?.window {
+            presentError(error, modalFor: window, delegate: nil, didPresent: nil, contextInfo: nil)
+        } else {
+            presentError(error)
+        }
+    }
+
+    /// Text longer than this (UTF-16 units, about 100 KB of plain text) is
+    /// written off the main thread with a progress sheet (M8 n6). Shorter
+    /// text is written on the main thread at once, as in M7: it takes
+    /// about 50 ms, less than a sheet would be shown for.
+    nonisolated static let backgroundPDFThreshold = 100_000
+
+    /// Stops a PDF still being written when the document closes.
+    override func close() {
+        pdfJob?.cancel()
+        super.close()
+    }
+
     /// Writes the PDF with QuickEdit's own drawing (`PDFRenderer`), never
-    /// the print system. It is drawn into a new private folder on the
-    /// target's volume and then moved to `url` in one step, so a failed
-    /// write leaves any old file as it was, and replacing a file on
-    /// another disk works (M7 review item 1). Before the move, the file
-    /// must be a whole PDF with every page drawn (`checkPDF`), so a partial
-    /// PDF never replaces a good one (M7 re-review item 1). Throws when no
-    /// whole PDF was written or the move fails; the folder is always removed.
+    /// the print system, on the main thread (the M7 path, used for short
+    /// text and by tests). See `writePDFFile` for how the file is written.
     func writePDF(to url: URL, options: PDFOptions) throws {
+        let source = try pdfSource(options: options, copiesText: false, laysOutScreenPages: true)
+        try Self.writePDFFile(to: url) { temporary in try Self.renderPDF(source, to: temporary, job: nil) }
+    }
+
+    /// Writes the PDF on a background thread from a copy of the text, so
+    /// the window stays responsive and the user can go on typing (M8 n6).
+    /// First the text's attributes are read through on the main thread in
+    /// short slices (`prepareTextForCopy`), so the copy itself is quick.
+    /// A progress sheet with Cancel shows when the write takes longer than
+    /// `PDFProgressSheet.delay`. `completion` runs on the main thread with
+    /// nil, the error, or `CocoaError(.userCancelled)` after Cancel (or a
+    /// close); a cancelled or failed write leaves no file and no folder,
+    /// and an old file at `url` as it was.
+    func startPDFWrite(to url: URL, options: PDFOptions, completion: @escaping (Error?) -> Void) {
+        let job = PDFJob()
+        pdfJob = job
+        let name = fileURL?.deletingPathExtension().lastPathComponent ?? displayName ?? "Untitled"
+        let sheet = PDFProgressSheet(job: job, title: "Exporting \u{201C}\(name)\u{201D} as PDF\u{2026}")
+        sheet.schedule(on: windowControllers.first?.window)
+        let end: (Error?) -> Void = { [weak self] error in
+            if let self, self.pdfJob === job { self.pdfJob = nil }
+            sheet.finish()
+            completion(error)
+        }
+        prepareTextForCopy(job: job) { [weak self] in
+            guard let self else { return end(CocoaError(.userCancelled)) }
+            if job.isCancelled { return end(CocoaError(.userCancelled)) }
+            let source: PDFSource
+            do {
+                source = try self.pdfSource(options: options, copiesText: true, laysOutScreenPages: false)
+            } catch {
+                return end(error)
+            }
+            nonisolated(unsafe) let finish = end
+            DispatchQueue.global(qos: .userInitiated).async {
+                var failure: Error?
+                do {
+                    try Self.writePDFFile(to: url, job: job) { temporary in try Self.renderPDF(source, to: temporary, job: job) }
+                } catch {
+                    failure = error
+                }
+                nonisolated(unsafe) let result = failure
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { finish(result) }
+                }
+            }
+        }
+    }
+
+    /// The first pass over a freshly read text's attributes is slow:
+    /// AppKit merges its attribute runs as it goes (10 MB: about 160 ms
+    /// the first time, 0.01 ms after; measured 2026-10-24). Any whole copy
+    /// of the text pays that, so it is paid here first, in slices of about
+    /// 8 ms between run-loop turns (in every run-loop mode, so a progress
+    /// sheet or a scroller drag does not stop it). Then calls `then`, also
+    /// when the job was cancelled meanwhile (it checks).
+    private func prepareTextForCopy(job: PDFJob, then: @escaping () -> Void) {
+        AttributePass(storage: textStorage, job: job, then: then).step()
+    }
+
+    /// Draws into a new private folder on the target's volume, then moves
+    /// the file to `url` in one step, so a failed or cancelled write leaves
+    /// any old file as it was, and replacing a file on another disk works
+    /// (M7 review item 1). Before the move, the file must be a whole PDF
+    /// with every page drawn (`checkPDF`), so a partial PDF never replaces
+    /// a good one (M7 re-review item 1). Throws when no whole PDF was
+    /// written or the move fails; the folder is always removed. Any thread.
+    /// With a `job`, Cancel is checked once more right before the move, so
+    /// a Cancel or close after the last page never replaces the old file
+    /// (M8 review row 6); it throws `CocoaError(.userCancelled)`.
+    nonisolated static func writePDFFile(to url: URL, job: PDFJob? = nil, draw: (URL) throws -> Int) throws {
         let files = FileManager.default
         let folder = try files.url(for: .itemReplacementDirectory, in: .userDomainMask,
                                    appropriateFor: url.deletingLastPathComponent(), create: true)
+        #if DEBUG
+        testHooks.withLock { $0.pdfTemporaryFolder }?(folder)
+        #endif
         defer {
             do {
                 try files.removeItem(at: folder)
@@ -807,17 +944,18 @@ extension TextDocument {
             }
         }
         let temporary = folder.appendingPathComponent(url.lastPathComponent)
-        let pages = try drawPDF(to: temporary, options: options)
+        let pages = try draw(temporary)
         #if DEBUG
-        Self.testHooks.withLock { $0.pdfTemporaryFile }?(temporary)
+        testHooks.withLock { $0.pdfTemporaryFile }?(temporary)
         #endif
-        guard Self.checkPDF(at: temporary, pages: pages) else {
+        guard checkPDF(at: temporary, pages: pages) else {
             throw CocoaError(.fileWriteUnknown, userInfo: [
                 NSURLErrorKey: url,
                 NSLocalizedDescriptionKey: "The PDF \u{201C}\(url.lastPathComponent)\u{201D} could not be written.",
                 NSLocalizedRecoverySuggestionErrorKey: "QuickEdit stopped before the PDF was finished.",
             ])
         }
+        try job?.checkCancelled()
         if files.fileExists(atPath: url.path) {
             // The Save panel asked already; replace in one step.
             _ = try files.replaceItemAt(url, withItemAt: temporary)
@@ -837,11 +975,39 @@ extension TextDocument {
         return pdf.numberOfPages == pages
     }
 
-    /// Lays out the pages and draws them to `url` (Document.m:633-677),
-    /// from a copy of the text with its own layout manager, so the
-    /// document's text never gets a second one. Returns the pages drawn.
+    /// What a PDF needs from the document and its window, read on the
+    /// main thread. The text is the live storage on the main-thread path,
+    /// or a copy for a background write.
+    struct PDFSource: @unchecked Sendable {
+        let text: NSAttributedString
+        let width: CGFloat
+        let layout: PageLayout
+        let origin: NSPoint
+        let scalesToFit: Bool
+        let header: PDFRenderer.Header?
+    }
+
+    /// Lays out the pages and draws them to `url` (Document.m:633-677) on
+    /// the main thread. Returns the pages drawn.
     @discardableResult
     func drawPDF(to url: URL, options: PDFOptions) throws -> Int {
+        try Self.renderPDF(pdfSource(options: options, copiesText: false, laysOutScreenPages: true), to: url, job: nil)
+    }
+
+    /// Lays out the pages from the source's text with its own layout
+    /// manager, so the document's text never gets a second one, and draws
+    /// them to `url`. Any thread, when the source's text is a copy.
+    nonisolated static func renderPDF(_ source: PDFSource, to url: URL, job: PDFJob?) throws -> Int {
+        let pagination = try PDFRenderer.Pagination(text: source.text, width: source.width, layout: source.layout,
+                                                    origin: source.origin, scalesToFit: source.scalesToFit, job: job)
+        return try PDFRenderer.write(pagination, layout: source.layout, header: source.header, to: url, job: job)
+    }
+
+    /// The source for a PDF of this document. `laysOutScreenPages`: in
+    /// Wrap to Page, lay out every page on screen first, as printing did
+    /// (Document.m:643-645); the background write leaves that to the
+    /// window's idle layout instead.
+    func pdfSource(options: PDFOptions, copiesText: Bool, laysOutScreenPages: Bool) throws -> PDFSource {
         if windowControllers.isEmpty { makeWindowControllers() }
         guard let controller = windowControllers.first as? DocumentWindowController else {
             throw CocoaError(.featureUnsupported, userInfo: [
@@ -852,26 +1018,22 @@ extension TextDocument {
         // TextEdit's job title: the window's view's printJobTitle (Document.m:662).
         let title = controller.scrollView.documentView?.printJobTitle ?? displayName ?? "Untitled"
         let header = options.headerAndFooter ? PDFRenderer.Header(title: title, date: PDFRenderer.Header.dateText(for: Date())) : nil
-        let pagination: PDFRenderer.Pagination
+        let text: NSAttributedString = copiesText ? NSAttributedString(attributedString: textStorage) : textStorage
         if hasMultiplePages, let pagesView = controller.pagesView {
             // The pages shown on screen: the page's text width at full
-            // size, the text where the page's text view puts it. Every page
-            // is laid out on screen too, as printing did (Document.m:643-645).
-            controller.layOutWholeText()
+            // size, the text where the page's text view puts it.
+            if laysOutScreenPages { controller.layOutWholeText() }
             let paper = pagesView.pageRect(forPage: 0)
-            let text = pagesView.documentRect(forPage: 0)
-            pagination = PDFRenderer.Pagination(text: textStorage, width: layout.documentSizeInPage.width, layout: layout,
-                                                origin: NSPoint(x: text.minX - paper.minX, y: text.minY - paper.minY),
-                                                scalesToFit: false)
-        } else {
-            // The page's text width (Rewrap on) or the window's (off),
-            // scaled to fit; the container starts at the margins.
-            let width = options.wrappingToFit ? layout.documentSizeInPage.width : controller.textView.frame.width
-            pagination = PDFRenderer.Pagination(text: textStorage, width: width, layout: layout,
-                                                origin: NSPoint(x: layout.leftMargin, y: layout.topMargin),
-                                                scalesToFit: true)
+            let area = pagesView.documentRect(forPage: 0)
+            return PDFSource(text: text, width: layout.documentSizeInPage.width, layout: layout,
+                             origin: NSPoint(x: area.minX - paper.minX, y: area.minY - paper.minY),
+                             scalesToFit: false, header: header)
         }
-        return try PDFRenderer.write(pagination, layout: layout, header: header, to: url)
+        // The page's text width (Rewrap on) or the window's (off),
+        // scaled to fit; the container starts at the margins.
+        let width = options.wrappingToFit ? layout.documentSizeInPage.width : controller.textView.frame.width
+        return PDFSource(text: text, width: width, layout: layout,
+                         origin: NSPoint(x: layout.leftMargin, y: layout.topMargin), scalesToFit: true, header: header)
     }
 }
 
@@ -1012,5 +1174,36 @@ struct SavePanelSession {
               let panelURL, panelURL.standardizedFileURL == url.standardizedFileURL else { return nil }
         used = true
         return encoding
+    }
+}
+
+/// Reads a text storage's attributes from start to end in slices of about
+/// 8 ms, one per run-loop turn (`TextDocument.prepareTextForCopy`). Keeps
+/// itself alive through its timer until it calls `then`.
+@MainActor
+private final class AttributePass {
+    private let storage: NSTextStorage
+    private let job: PDFJob
+    private let then: () -> Void
+    private var index = 0
+
+    init(storage: NSTextStorage, job: PDFJob, then: @escaping () -> Void) {
+        self.storage = storage
+        self.job = job
+        self.then = then
+    }
+
+    func step() {
+        let deadline = DispatchTime.now().uptimeNanoseconds + 8_000_000
+        while index < storage.length, DispatchTime.now().uptimeNanoseconds < deadline, !job.isCancelled {
+            var run = NSRange()
+            _ = storage.attributes(at: index, effectiveRange: &run)
+            index = max(NSMaxRange(run), index + 1)
+        }
+        guard index < storage.length, !job.isCancelled else { return then() }
+        let timer = Timer(timeInterval: 0, repeats: false) { _ in
+            MainActor.assumeIsolated { self.step() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
     }
 }

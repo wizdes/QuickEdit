@@ -339,6 +339,32 @@ enum PlainTextIO {
 
     // MARK: Line endings
 
+    /// The same count over file bytes, fast (M8 n2): one byte at a time
+    /// through `Sequence` it took 430 ms for 100 MB and 4.8 s for 1 GB,
+    /// most of the time to open a big file. A file with no CR at all (most
+    /// files) is LF at once, found with `memchr`. Otherwise the three
+    /// counts are sums the compiler can run on many bytes at once: every
+    /// LF, every CR, and every CR followed by LF. Same answer as the
+    /// byte-by-byte count, ties included.
+    static func mostCommonLineEnding(in data: Data) -> LineEnding {
+        data.withUnsafeBytes { raw -> LineEnding in
+            guard let base = raw.baseAddress, !raw.isEmpty else { return .lf }
+            if memchr(base, 0x0D, raw.count) == nil { return .lf }
+            let bytes = raw.bindMemory(to: UInt8.self)
+            var lfTotal = 0, crTotal = 0, crlf = 0
+            var previous: UInt8 = 0
+            for byte in bytes {
+                lfTotal &+= byte == 0x0A ? 1 : 0
+                crTotal &+= byte == 0x0D ? 1 : 0
+                crlf &+= (previous == 0x0D && byte == 0x0A) ? 1 : 0
+                previous = byte
+            }
+            let lf = lfTotal - crlf, cr = crTotal - crlf
+            if lf >= crlf && lf >= cr { return .lf }
+            return crlf >= cr ? .crlf : .cr
+        }
+    }
+
     /// Counts LF, CRLF and lone CR in one pass. Ties go to LF, then CRLF,
     /// then CR; text with no line ending reports LF. Works on bytes of any
     /// encoding where CR and LF are single bytes (UTF-8 and the 8-bit and

@@ -1,4 +1,5 @@
 import AppKit
+import os
 
 /// One window per document (contract `win-text`): a ScalingScrollView and one
 /// TextKit 1 layout manager on the document's storage, shared by every text
@@ -72,8 +73,10 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
+        Signposts.markOnce(.firstWindowCreated)
 
         document.textStorage.addLayoutManager(layoutManager)
+        Signposts.mark(.storageInstalled)
         layoutManager.delegate = self
         // This makes the first text view (DocumentWindowController.m:681-698).
         setHasMultiplePages(document.hasMultiplePages, force: true)
@@ -113,6 +116,8 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
                            name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
         center.addObserver(self, selector: #selector(documentTextDidProcessEditing(_:)),
                            name: NSTextStorage.didProcessEditingNotification, object: document.textStorage)
+        center.addObserver(self, selector: #selector(documentTextWillProcessEditing(_:)),
+                           name: NSTextStorage.willProcessEditingNotification, object: document.textStorage)
 
         // A new print info resizes every page (DocumentWindowController.m:220-222,
         // :264-279). QuickEdit has no Page Setup (U1); tests set one.
@@ -165,7 +170,15 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
             scrollView.backgroundColor = .underPageBackgroundColor
             if !hadViews { configureFirstTextView() }
             showSelectionAndCenterPage()
+            // The window lays out the pages itself, in short slices (M8 n3).
+            // Edits made in Wrap to Window did not lower the glyph mark, so
+            // it starts again from the start (M8 review row 9).
+            layoutManager.backgroundLayoutEnabled = false
+            resetIdleLayout()
+            scheduleIdleLayout()
         } else {
+            stopIdleLayout()
+            layoutManager.backgroundLayoutEnabled = true
             let (textView, container) = TextViewFactory.makeWindowModeTextView(size: scrollView.contentSize)
             layoutManager.insertTextContainer(container, at: 0)
             // Remove the pages from the end: each removal then invalidates
@@ -195,6 +208,40 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
     private func configureFirstTextView() {
         TextViewFactory.configureSharedState(textView)
         TextViewFactory.configureTypingAttributes(textView)
+        applyLargeFileMode(updatesTitle: false)
+    }
+
+    // MARK: Large files (M8 n2)
+
+    /// Added to the window title of a large file, so the user knows why
+    /// the checks are off. The Edit menu can still turn each one on for
+    /// this window.
+    static let largeFileTitleNote = "Large file: spelling and substitutions off"
+
+    /// The window's checks from before large-file mode turned them off;
+    /// nil while the mode is off.
+    private var checksBeforeLargeFile: TextViewFactory.TypingChecks?
+
+    /// Turns the checks off when the document is large, and puts the
+    /// window's own back when it no longer is; then the title follows. The
+    /// document calls this after a reload or a revert changed its size
+    /// (M8 review row 2). The checks are shared by every view on the
+    /// layout manager, so the first view stands for all.
+    func applyLargeFileMode(updatesTitle: Bool = true) {
+        let large = textDocument?.isLargeFile == true
+        if large, checksBeforeLargeFile == nil {
+            checksBeforeLargeFile = TextViewFactory.TypingChecks(of: textView)
+            TextViewFactory.turnOffChecks(textView)
+        } else if !large, let saved = checksBeforeLargeFile {
+            saved.apply(to: textView)
+            checksBeforeLargeFile = nil
+        }
+        if updatesTitle { synchronizeWindowTitleWithDocumentName() }
+    }
+
+    override func windowTitle(forDocumentDisplayName displayName: String) -> String {
+        guard textDocument?.isLargeFile == true else { return displayName }
+        return displayName + " \u{2014} " + Self.largeFileTitleNote
     }
 
     /// Adds one page: a container the size of the page's text area and a
@@ -254,6 +301,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
     /// layout ends with room to spare (DocumentWindowController.m:992-1022).
     func layoutManager(_ layoutManager: NSLayoutManager, didCompleteLayoutFor textContainer: NSTextContainer?,
                        atEnd layoutFinishedFlag: Bool) {
+        Signposts.markOnce(.firstLayout)
         guard hasMultiplePages else { return }
         let containers = layoutManager.textContainers
         if !layoutFinishedFlag || textContainer == nil {
@@ -275,12 +323,139 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
     /// the text shorter), AppKit lays nothing out again and sends no layout
     /// callback, so the empty pages at the end would stay. TextEdit has the
     /// same gap. This removes them on the next turn of the run loop.
+    /// In Wrap to Page an edit also starts the idle layout again (M8 n3),
+    /// and every edit ends the "storage edit" signpost interval (M8 n7).
     @objc private func documentTextDidProcessEditing(_ notification: Notification) {
+        if let storageEditSignpost {
+            Signposts.endStorageEdit(storageEditSignpost)
+            self.storageEditSignpost = nil
+        }
         guard hasMultiplePages, let storage = notification.object as? NSTextStorage,
-              storage.editedMask.contains(.editedCharacters), storage.changeInLength < 0 else { return }
+              storage.editedMask.contains(.editedCharacters) else { return }
+        // The edit left glyphs and layout after it to make again.
+        idleGlyphsDone = min(idleGlyphsDone, storage.editedRange.location)
+        scheduleIdleLayout()
+        guard storage.changeInLength < 0 else { return }
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated { self?.removeEmptyTrailingPages() }
         }
+    }
+
+    /// The "storage edit" signpost interval (M8 n7) runs from here to
+    /// `documentTextDidProcessEditing`.
+    private var storageEditSignpost: OSSignpostIntervalState?
+
+    @objc private func documentTextWillProcessEditing(_ notification: Notification) {
+        storageEditSignpost = Signposts.beginStorageEdit()
+    }
+
+    // MARK: Idle layout in Wrap to Page (M8 n3)
+
+    /// AppKit's background layout laid out Wrap to Page in pieces that
+    /// blocked the main thread for 370 ms on a 10 MB file: the first
+    /// layout call made the glyphs for the whole text at once. In Wrap to
+    /// Page the window turns it off and does the work itself, in slices of
+    /// about this long per run-loop turn: first the glyphs, then the
+    /// layout (which adds the page views). Events and drawing run between
+    /// slices. Wrap to Window keeps AppKit's background layout, which
+    /// non-contiguous layout keeps near what is shown.
+    static let idleLayoutSliceSeconds = 0.012
+    /// Characters per glyph or layout call; doubled or halved to fit the slice.
+    private var idleGlyphChunk = 65_536
+    private var idleLayoutChunk = 4_096
+    /// Glyphs are known to exist for the characters before this index.
+    /// Lowered by edits (`documentTextDidProcessEditing`).
+    private(set) var idleGlyphsDone = 0
+    /// The next slice, while one is scheduled. Read by tests.
+    private(set) var idleLayoutTimer: Timer?
+    /// The window closed: no more idle layout (M8 review row 9).
+    private var isClosed = false
+    #if DEBUG
+    /// Tests: replaces the layout call of a slice (`ensureLayout`), so a
+    /// test can make a slice that lays out nothing.
+    var idleLayoutCallForTests: ((NSLayoutManager, NSRange) -> Void)?
+    #endif
+
+    /// Lays out one more slice on the next run-loop turn, in the default
+    /// mode only (not while the user drags a scroller or a menu is open,
+    /// as AppKit's background layout).
+    private func scheduleIdleLayout() {
+        guard hasMultiplePages, !isClosed, idleLayoutTimer == nil else { return }
+        let timer = Timer(timeInterval: 0, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.idleLayoutTimer = nil
+                self.layOutIdleSlice()
+            }
+        }
+        idleLayoutTimer = timer
+        RunLoop.main.add(timer, forMode: .default)
+    }
+
+    /// One slice: glyphs while some are missing, else layout. Calls the
+    /// next slice while work is left.
+    private func layOutIdleSlice() {
+        guard hasMultiplePages, let length = layoutManager.textStorage?.length else { return }
+        let budget = UInt64(Self.idleLayoutSliceSeconds * 1e9)
+        let start = DispatchTime.now().uptimeNanoseconds
+        /// Runs `work` and adapts `chunk` to the time it took.
+        func timed(_ chunk: inout Int, _ work: () -> Void) -> UInt64 {
+            let callStart = DispatchTime.now().uptimeNanoseconds
+            work()
+            let now = DispatchTime.now().uptimeNanoseconds
+            let call = now - callStart
+            if call < budget / 4 {
+                chunk = min(chunk * 2, 1 << 22)
+            } else if call > budget / 2 {
+                chunk = max(chunk / 2, 256)
+            }
+            return now
+        }
+        idleGlyphsDone = min(idleGlyphsDone, length)
+        while idleGlyphsDone < length {
+            let range = NSRange(location: idleGlyphsDone, length: min(idleGlyphChunk, length - idleGlyphsDone))
+            let now = timed(&idleGlyphChunk) { layoutManager.ensureGlyphs(forCharacterRange: range) }
+            idleGlyphsDone = NSMaxRange(range)
+            if now - start >= budget { return scheduleIdleLayout() }
+        }
+        var next = layoutManager.firstUnlaidCharacterIndex()
+        while next < length {
+            let end = min(length, next + idleLayoutChunk)
+            let now = timed(&idleLayoutChunk) {
+                let range = NSRange(location: end - 1, length: 1)
+                #if DEBUG
+                if let idleLayoutCallForTests { return idleLayoutCallForTests(layoutManager, range) }
+                #endif
+                layoutManager.ensureLayout(forCharacterRange: range)
+            }
+            let reached = layoutManager.firstUnlaidCharacterIndex()
+            // No progress: stop, and schedule nothing (M8 review row 1).
+            // An edit or a new page size starts it again.
+            guard reached > next else { return }
+            next = reached
+            if now - start >= budget { break }
+        }
+        if next < length { scheduleIdleLayout() }
+    }
+
+    /// Stops the idle layout: the next slice is not run.
+    private func stopIdleLayout() {
+        idleLayoutTimer?.invalidate()
+        idleLayoutTimer = nil
+    }
+
+    /// Forgets what the idle layout knew; the glyph pass starts at 0.
+    private func resetIdleLayout() {
+        stopIdleLayout()
+        idleGlyphsDone = 0
+        idleGlyphChunk = 65_536
+        idleLayoutChunk = 4_096
+    }
+
+    /// The window closes: the idle layout stops for good (M8 review row 9).
+    func windowWillClose(_ notification: Notification) {
+        isClosed = true
+        stopIdleLayout()
     }
 
     /// Removes pages after the one holding the last character, only when
@@ -318,6 +493,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
             container.textView?.frame = frame
             page += 1
         }
+        scheduleIdleLayout()
     }
 
     /// Lays out the whole text, so Wrap to Page has every page; printing
@@ -526,10 +702,12 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
     func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         guard Self.newlineCommands.contains(commandSelector),
               let document = document as? TextDocument else { return false }
-        let ending = document.format.lineEnding
-        guard ending != .lf else { return false }
-        textView.insertText(ending.string, replacementRange: textView.selectedRange())
-        return true
+        return Signposts.interval("line ending") {
+            let ending = document.format.lineEnding
+            guard ending != .lf else { return false }
+            textView.insertText(ending.string, replacementRange: textView.selectedRange())
+            return true
+        }
     }
 
     /// Checks only the inserted characters, never the whole text. The
@@ -551,12 +729,14 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
 
     private func checkInsertion(_ strings: [String], in textView: NSTextView) {
         guard let document = document as? TextDocument,
-              strings.contains(where: { document.insertionDoesNotFit($0) }) else { return }
+              Signposts.interval("encoding check", { strings.contains(where: { document.insertionDoesNotFit($0) }) })
+        else { return }
         textView.breakUndoCoalescing()
         encodingCheckPending = true
     }
 
     func textDidChange(_ notification: Notification) {
+        Signposts.markOnce(.firstKeyAccepted)
         guard encodingCheckPending else { return }
         encodingCheckPending = false
         // While an input method composes, the marked text is not the user's

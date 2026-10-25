@@ -86,7 +86,13 @@ for want in "-configuration" "Debug" "SWIFT_OPTIMIZATION_LEVEL=-O" "SWIFT_COMPIL
     "CODE_SIGN_IDENTITY=-" "ENABLE_HARDENED_RUNTIME=NO" \
     "-only-testing:QuickEditTests/LinePanelTests/testSelectLineOneMillionIn100MB" \
     "-only-testing:QuickEditTests/LinePanelTests/testSelectLineBackNearlyOneMillionIn100MB" \
-    "-only-testing:QuickEditTests/PageModeTests/testTenMegabyteSwitchTime"; do
+    "-only-testing:QuickEditTests/PageModeTests/testTenMegabyteSwitchTime" \
+    "-only-testing:QuickEditTests/WrapToPageStallTests/testTenMegabyteNoStallAfterSwitch" \
+    "-only-testing:QuickEditTests/PrintTests/testTenMegabyteExportKeepsTheWindowResponsive" \
+    "-only-testing:QuickEditTests/PrintTests/testTenMegabyteExportInWrapToPageKeepsTheWindowResponsive" \
+    "-only-testing:QuickEditTests/PrintTests/testTenMegabyteExportInWrapToPageStaysUnderTwiceTheText" \
+    "-only-testing:QuickEditTests/PlainTextIOTests/testLineEndingCountOf100MBIsFast" \
+    "-only-testing:QuickEditTests/TypingSpeedTests/testWrapToPageTypingAtTheStartOf100MB"; do
     grep -qxF -- "$want" <<<"$args" || missing+=" $want"
 done
 if [ "$status" -ne 0 ] && [ -z "$missing" ] && [ -n "$derived" ] && [ "$derived" != "$ROOT/build/DerivedData" ] \

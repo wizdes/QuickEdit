@@ -114,6 +114,7 @@ final class ReviewFixTests: XCTestCase {
     func testEditDuringWriteLandsAndStaysUnsaved() async throws {
         let url = try file("unblock.txt", "one\n")
         let document = try TextDocument(contentsOf: url, ofType: type)
+        documents.append(document)
         append("two\n", to: document)
         let editLanded = DispatchSemaphore(value: 0)
         let sawEditDuringWrite = Mutex(false)
