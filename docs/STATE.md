@@ -1,14 +1,14 @@
 # QuickEdit state
 
-Rewritten at each milestone, never appended. Last rewrite: 2026-10-24, M1 to M5 built on dev.
+Rewritten at each milestone, never appended. Last rewrite: 2026-10-24, M7 done and merged into main.
 
-Milestone: M6 (Settings) building; encoding change (vote V2, match AppKit) building; M3+M5 reviews (Astra and Opus) running.
-Branch / worktree / commit: dev / worktrees/dev / 0485e07. main holds docs only; dev merges into main when UI tests have run.
-Unmerged work: all app code is on dev.
-Checks run: `./build.sh unit` 155 of 155 (shell tests 2 of 2); `xcodebuild build-for-testing` OK; Release build signs with Developer ID.
-Not run: about 40 UI tests (screen locked: CGSSessionScreenIsLocked true), launch timing for QuickEdit, TextEdit side-by-side checks, notarization of milestone builds after M1.
-Speed facts so far: TextEdit launch 265.2 ms; Select Line 1,000,000 of 100 MB 93.8 ms forward, 91.4 ms backward; 10 MB switch to Wrap to Page 1.9 ms then one 340 ms freeze (M8).
-Approvals: plain text, Swift, QuickEdit, vote rule, plan (2026-10-23); delete 3 old UTF-8-only tests (2026-10-24). Votes V1 TextKit 1, V2 match AppKit encoding detection.
-Open questions: screen lock (user).
-Dead ends: osascript System Events; runner sandbox for Xcode builds; `rm -rf` with variable paths (blocked by the safety check; use literal paths).
-Next action: merge the encoding change and M6 onto dev, fix review findings, then plan M7 (printing and PDF).
+Milestone: M7 (PDF output) done. Next: M8 (speed).
+Branch / worktree / commit: dev at 5920d65, merged into main at 8c90440. Work continues on dev (worktrees/dev) and merges into main at each milestone check.
+Unmerged work: none.
+Checks run at 5920d65's code (b750aae): `./build.sh test` 315 of 315 (unit and UI, shell tests 3 of 3). M7 build notarized: builds/QuickEdit-M7.zip (Accepted, stapled). Diagram: docs/diagrams/M7.html.
+Not run: TextKit 2 benchmark at n=5 (needs a quiet Mac); typing latency; M2 to M6 notarized builds and diagrams (only M1 and M7 have builds).
+Speed facts: launch to keystroke-ready 269.4 ms vs TextEdit window 292.6 ms (median of 5, 2026-10-24); Select Line near line 1,000,000 of 100 MB about 91 ms each way; 10 MB switch to Wrap to Page 4 ms; 1 MB to PDF 492 ms (Wrap to Window), 883 ms (Wrap to Page).
+User decisions: plain text, Swift, QuickEdit, vote rule, plan (2026-10-23); 3 old UTF-8 tests deleted; 3 UI test assertion changes; encoding test changes; U1 PDF only, no printing; U2 custom keyboard shortcuts in M9; UI tests guard every key press and the dark mode test opens a file (all 2026-10-24). Votes: V1 TextKit 1, V2 match AppKit encoding detection.
+Choices to check: docs/decisions.md "Choices to check"; M7: PDFs drawn by QuickEdit (Core Graphics), header and footer look, paper-size pop-up not in the Tab order.
+Traps: UI tests type into the front app (now guarded); Page Setup triggers a local-network prompt (removed); full-screen test shots show the user's desktop; the disk filled once (clear build/ and old scratch clones).
+Next action: TextKit 2 benchmark n=5 when the Mac is idle, then plan and build M8.
