@@ -20,6 +20,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #if DEBUG
         TestHooks.start(arguments: ProcessInfo.processInfo.arguments)
         #endif
+        // Clones of large files left by a QuickEdit that crashed or was
+        // killed (M8 review row 14); off the main thread, after launch.
+        DispatchQueue.global(qos: .utility).async { LargeFileOriginal.removeStaleFolders() }
         guard let testOpenPath else { return }
         let url = URL(fileURLWithPath: (testOpenPath as NSString).expandingTildeInPath)
         NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { _, _, error in

@@ -98,6 +98,53 @@ final class PlainTextIOTests: XCTestCase {
         XCTAssertEqual(Array(decoded.text.utf8), Array(text.utf8), "no normalization")
     }
 
+    /// M8 n2: the count over `Data` (one pass over raw bytes) gives the
+    /// byte-by-byte answer for every mix, at any start index (slices
+    /// after a BOM) and with CR LF split across the middle of the data.
+    func testLineEndingCountOverDataMatchesTheByteByByteCount() {
+        let pieces: [[UInt8]] = [[0x0A], [0x0D], [0x0D, 0x0A], [0x61], [0x0D, 0x0D], [0x0A, 0x0D]]
+        var generator = SystemRandomNumberGenerator()
+        for round in 0..<500 {
+            var bytes: [UInt8] = []
+            for _ in 0..<Int.random(in: 0...40, using: &generator) {
+                bytes += pieces.randomElement(using: &generator)!
+            }
+            let data = Data(bytes)
+            XCTAssertEqual(PlainTextIO.mostCommonLineEnding(in: data), PlainTextIO.mostCommonLineEnding(in: bytes),
+                           "round \(round): \(bytes)")
+            let prefix = Int.random(in: 0...min(3, bytes.count), using: &generator)
+            let slice = data.dropFirst(prefix)
+            XCTAssertEqual(PlainTextIO.mostCommonLineEnding(in: slice), PlainTextIO.mostCommonLineEnding(in: Array(bytes.dropFirst(prefix))),
+                           "round \(round), slice from \(prefix): \(bytes)")
+        }
+        // Ties and the plain cases.
+        XCTAssertEqual(PlainTextIO.mostCommonLineEnding(in: Data("a\r\nb\nc\r".utf8)), .lf)
+        XCTAssertEqual(PlainTextIO.mostCommonLineEnding(in: Data("a\r\nb\r\nc\n".utf8)), .crlf)
+        XCTAssertEqual(PlainTextIO.mostCommonLineEnding(in: Data("a\rb\rc\r\n".utf8)), .cr)
+        XCTAssertEqual(PlainTextIO.mostCommonLineEnding(in: Data()), .lf)
+    }
+
+    /// M8 n2: counting the line endings of 100 MB took about 480 ms one
+    /// byte at a time (4.8 s for 1 GB, 2026-10-24); it must stay under
+    /// 100 ms in an optimized build, both with no CR at all and with CR LF.
+    func testLineEndingCountOf100MBIsFast() {
+        let line = Data("line 00000000 the quick brown fox jumps over the lazy dog 0123456789\n".utf8)
+        let crlfLine = Data("line 00000000 the quick brown fox jumps over the lazy dog 012345678\r\n".utf8)
+        for (name, unit, expected) in [("LF", line, LineEnding.lf), ("CRLF", crlfLine, LineEnding.crlf)] {
+            var data = Data(capacity: 100 * 1024 * 1024 + unit.count)
+            while data.count < 100 * 1024 * 1024 { data.append(unit) }
+            let start = DispatchTime.now().uptimeNanoseconds
+            let ending = PlainTextIO.mostCommonLineEnding(in: data)
+            let ms = Double(DispatchTime.now().uptimeNanoseconds - start) / 1e6
+            print(String(format: "M8-N2 line-ending count, 100 MB of %@ lines: %.1f ms; optimized: %@", name, ms,
+                         _isDebugAssertConfiguration() ? "false" : "true"))
+            XCTAssertEqual(ending, expected)
+            if !_isDebugAssertConfiguration() {
+                XCTAssertLessThan(ms, 100, "\(name): \(ms) ms")
+            }
+        }
+    }
+
     func testNoLineEndingReportsLF() {
         XCTAssertEqual(PlainTextIO.mostCommonLineEnding(in: Array("abc".utf8)), .lf)
     }

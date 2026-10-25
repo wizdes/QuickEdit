@@ -2,6 +2,7 @@
 # Writes the timing fixtures to bench/fixtures/ (ignored by Git). Same bytes every run.
 #   1mb.txt, 10mb.txt, 100mb.txt   short ASCII lines, exactly 1, 10 and 100 MiB
 #   long-line-10mb.txt             one 10 MiB line, no line ending
+#   bench/make-fixtures.sh --1gb   only 1gb.txt, 1 GiB of the same short lines (M8 n4)
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)/fixtures"
 mkdir -p "$DIR"
@@ -35,6 +36,12 @@ long_line() { # name bytes
     ' "$DIR/$1" "$2"
 }
 
+if [ "${1:-}" = "--1gb" ]; then
+    # M8 n4 only: 1 GiB of short lines, about 1 GB of disk. Delete it when done.
+    lines 1gb.txt $((1024 * 1024 * 1024))
+    echo "1gb.txt $(stat -f %z "$DIR/1gb.txt") bytes"
+    exit 0
+fi
 lines 1mb.txt $((1024 * 1024))
 lines 10mb.txt $((10 * 1024 * 1024))
 lines 100mb.txt $((100 * 1024 * 1024))

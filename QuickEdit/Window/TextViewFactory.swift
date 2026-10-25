@@ -127,6 +127,48 @@ enum TextViewFactory {
         textView.isAutomaticTextReplacementEnabled = Defaults.bool(.textReplacement)
     }
 
+    /// Large-file mode (M8 n2): every check that works on the text while
+    /// it is typed, off for this layout manager's views. Settings stay as
+    /// they are.
+    @MainActor
+    static func turnOffChecks(_ textView: NSTextView) {
+        textView.isContinuousSpellCheckingEnabled = false
+        textView.isGrammarCheckingEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticDataDetectionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+    }
+
+    /// The checks `turnOffChecks` turns off, as one window has them, so
+    /// they can be put back when the file is no longer large (M8 review row 2).
+    struct TypingChecks: Equatable {
+        var spelling, grammar, correction, quotes, dashes, dataDetection, replacement: Bool
+
+        @MainActor
+        init(of textView: NSTextView) {
+            spelling = textView.isContinuousSpellCheckingEnabled
+            grammar = textView.isGrammarCheckingEnabled
+            correction = textView.isAutomaticSpellingCorrectionEnabled
+            quotes = textView.isAutomaticQuoteSubstitutionEnabled
+            dashes = textView.isAutomaticDashSubstitutionEnabled
+            dataDetection = textView.isAutomaticDataDetectionEnabled
+            replacement = textView.isAutomaticTextReplacementEnabled
+        }
+
+        @MainActor
+        func apply(to textView: NSTextView) {
+            textView.isContinuousSpellCheckingEnabled = spelling
+            textView.isGrammarCheckingEnabled = grammar
+            textView.isAutomaticSpellingCorrectionEnabled = correction
+            textView.isAutomaticQuoteSubstitutionEnabled = quotes
+            textView.isAutomaticDashSubstitutionEnabled = dashes
+            textView.isAutomaticDataDetectionEnabled = dataDetection
+            textView.isAutomaticTextReplacementEnabled = replacement
+        }
+    }
+
     /// Plain font and tab stops for each new view
     /// (DocumentWindowController.m:404-412).
     @MainActor

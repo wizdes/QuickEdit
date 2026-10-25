@@ -5,7 +5,13 @@
 #   ./build.sh unit                   shell tests, then unit tests only (works with the screen locked)
 #   ./build.sh only <T[/C[/m]]>...    just these tests, same checks (for reruns)
 #   ./build.sh speed                  the speed tests in an optimized build with their real
-#                                     limits (Select Line 200 ms both ways, Wrap to Page 300 ms)
+#                                     limits (Select Line 200 ms both ways, Wrap to Page 300 ms,
+#                                     no main-thread block over 100 ms after it or during a 10 MB
+#                                     PDF export, export memory under 2x the text (Wrap to Page: pages laid out first), line-ending
+#                                     count of 100 MB 100 ms, Wrap to Page typing p95 8 ms; 1 GB opens
+#                                     read-only and 512 MB editable, each with no main-thread block
+#                                     over 200 ms and a peak under 1.5 GB, and a 1 GB reload within the
+#                                     same limits: needs about 2 GB free disk)
 #   ./build.sh dist M<n> [--skip-tests]
 #                                     full tests, then Release build, zip to builds/QuickEdit-M<n>.zip,
 #                                     notarize when the keychain is open
@@ -301,16 +307,39 @@ case "$cmd" in
         TEST_DERIVED="$BUILD/DerivedData-speed-$$"
         trap 'rm -rf "$TEST_DERIVED"' EXIT
         TEST_SETTINGS=(SWIFT_OPTIMIZATION_LEVEL=-O SWIFT_COMPILATION_MODE=wholemodule ENABLE_HARDENED_RUNTIME=NO)
-        run_tests "QuickEditTests/LinePanelTests/testSelectLineOneMillionIn100MB QuickEditTests/LinePanelTests/testSelectLineBackNearlyOneMillionIn100MB QuickEditTests/PageModeTests/testTenMegabyteSwitchTime" speed
+        # The 1 GB and 512 MB open tests (M8, vote V3) run only with this
+        # set; they make their files in a temp folder and delete them.
+        export TEST_RUNNER_QE_BIG_FILE_TESTS=1
+        run_tests "QuickEditTests/LargeFileSpeedTests/testOneGigabyteOpensReadOnlyWithinTheLimits QuickEditTests/LargeFileSpeedTests/testHalfGigabyteOpensEditableWithinTheLimits QuickEditTests/LargeFileSpeedTests/testOneGigabyteReloadStaysWithinTheLimits QuickEditTests/LinePanelTests/testSelectLineOneMillionIn100MB QuickEditTests/LinePanelTests/testSelectLineBackNearlyOneMillionIn100MB QuickEditTests/PageModeTests/testTenMegabyteSwitchTime QuickEditTests/WrapToPageStallTests/testTenMegabyteNoStallAfterSwitch QuickEditTests/PrintTests/testTenMegabyteExportKeepsTheWindowResponsive QuickEditTests/PrintTests/testTenMegabyteExportInWrapToPageKeepsTheWindowResponsive QuickEditTests/PrintTests/testTenMegabyteExportInWrapToPageStaysUnderTwiceTheText QuickEditTests/PlainTextIOTests/testLineEndingCountOf100MBIsFast QuickEditTests/TypingSpeedTests/testWrapToPageTypingAtTheStartOf100MB" speed
         echo "SPEED (medians, limits in brackets):"
         grep -E "^Select Line 1,000,000 in 100 MB" "$TEST_LOG" | head -1 | sed -E 's/.*(median [0-9.]+ ms).*/  Select Line forward, 1,000,000 lines of 100 MB: \1 [200 ms]/'
         grep -E "^Select Line -999999 from the end" "$TEST_LOG" | head -1 | sed -E 's/.*(median [0-9.]+ ms).*/  Select Line backward, -999999 from the end: \1 [200 ms]/'
         grep -E "^M5-TIMING" "$TEST_LOG" | head -1 | sed -E 's/.*switch to page ms: [^;]* median ([0-9.]+);.*/  Wrap to Page switch, 10 MB: median \1 ms [300 ms]/'
+        grep -E "^M8-N3" "$TEST_LOG" | head -1 | sed -E 's/.*(longest main-thread gap [0-9.]+ ms).*/  Wrap to Page, 3 s after the 10 MB switch: \1 [100 ms]/'
+        grep -E "^M8-N6 10 MB Wrap to Window export" "$TEST_LOG" | head -1 | sed -E 's/.*(longest main-thread gap [0-9.]+ ms); (peak footprint [^ ]+ MB) \(text ([0-9]+) MB.*/  10 MB export, Wrap to Window: \1 [100 ms]; \2 [2x the \3 MB text]/'
+        grep -E "^M8-N6 10 MB Wrap to Page export: " "$TEST_LOG" | head -1 | sed -E 's/.*(longest main-thread gap [0-9.]+ ms); (peak footprint [^ ]+ MB).*/  10 MB export, Wrap to Page, pages laid out meanwhile: \1 [100 ms]; \2 (no limit: holds the pages too)/'
+        grep -E "^M8-N6 10 MB Wrap to Page export after its pages" "$TEST_LOG" | head -1 | sed -E 's/.*(peak footprint [^ ]+ MB) \(text ([0-9]+) MB in memory\); the ([0-9]+) pages themselves ([^ ]+ MB).*/  10 MB export, Wrap to Page, pages laid out first: \1 [2x the \2 MB text]; the \3 pages took \4/'
+        grep -E "^M8-N2 line-ending count" "$TEST_LOG" | sed -E 's/^M8-N2 line-ending count, 100 MB of ([A-Z]+) lines: ([0-9.]+ ms).*/  Line-ending count, 100 MB of \1 lines: \2 [100 ms]/'
+        grep -E "^slow keys.*M8-N7 100 MB Wrap to Page typing at the start" "$TEST_LOG" | head -1 | sed -E 's/.*total p50 ([0-9.]+) p95 ([0-9.]+) .*/  Wrap to Page typing at the start of 100 MB: p50 \1 ms, p95 \2 ms [p95 8 ms]/'
+        grep -E "^M8-V3 (1024|512) MB open" "$TEST_LOG" | sed -E 's/^M8-V3 ([0-9]+) MB open.*usable ([0-9]+ ms).*longest main-thread block \(window and first display\) ([0-9.]+ ms).*idle after ([0-9.]+ ms); first scroll ([0-9.]+ ms).*first key ([0-9.]+ ms); peak footprint ([0-9]+ MB).*read-only ([a-z]+) .*/  Open \1 MB (read-only \8): usable \2; main-thread block \3, idle gap \4, first scroll \5, first key \6 [200 ms]; peak \7 [1536 MB]/'
         # The limits apply only when the tests saw an optimized build.
         [ "$(grep -cE '^Select Line .*optimized \(-O\)' "$TEST_LOG")" -eq 2 ] \
             || die "the Select Line tests did not run optimized (log: $TEST_LOG)"
         grep -qE '^M5-TIMING.*optimized: true' "$TEST_LOG" \
             || die "the Wrap to Page test did not run optimized (log: $TEST_LOG)"
+        grep -qE '^M8-N3.*optimized: true' "$TEST_LOG" \
+            || die "the Wrap to Page stall test did not run optimized (log: $TEST_LOG)"
+        [ "$(grep -cE '^M8-N6 10 MB .* export.*optimized: true' "$TEST_LOG")" -eq 3 ] \
+            || die "the three 10 MB export tests did not run optimized (log: $TEST_LOG)"
+        [ "$(grep -cE '^M8-N2 line-ending count.*optimized: true' "$TEST_LOG")" -eq 2 ] \
+            || die "the line-ending count test did not run optimized (log: $TEST_LOG)"
+        grep -qE 'M8-N7 100 MB Wrap to Page typing at the start.*optimized: true' "$TEST_LOG" \
+            || die "the Wrap to Page typing test did not run optimized (log: $TEST_LOG)"
+        grep -E "^M8-V3 1024 MB reload" "$TEST_LOG" | sed -E 's/^M8-V3 1024 MB reload, n=3 medians: (longest main-thread block [0-9.]+ ms).*(peak footprint [0-9]+ MB).*(clone at open [0-9.]+ ms).*(Save panel setup [0-9.]+ ms).*/  Reload 1024 MB: \1 [200 ms]; \2 [1536 MB]; \3; \4 [200 ms]/'
+        grep -qE '^M8-V3 1024 MB reload.*optimized: true' "$TEST_LOG" \
+            || die "the 1 GB reload test did not run optimized (log: $TEST_LOG)"
+        [ "$(grep -cE '^M8-V3 (1024|512) MB open.*optimized: true' "$TEST_LOG")" -eq 2 ] \
+            || die "the 1 GB and 512 MB open tests did not run optimized (log: $TEST_LOG)"
         echo "SPEED: PASS"
         ;;
     uicheck)

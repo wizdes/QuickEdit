@@ -876,6 +876,518 @@ final class PrintTests: XCTestCase {
         }
         XCTAssertEqual(try write(document).pageCount, pdf.pageCount, "page count changed")
     }
+
+    // MARK: M8 n6: large PDFs off the main thread
+
+    /// Short lines like bench/make-fixtures.sh's, about `bytes` long.
+    private func fixtureText(bytes: Int) -> String {
+        var out = ""
+        out.reserveCapacity(bytes + 80)
+        var n = 0
+        while out.utf8.count < bytes {
+            out += String(format: "line %08d the quick brown fox jumps over the lazy dog 0123456789\n", n)
+            n += 1
+        }
+        return out
+    }
+
+    /// The process's physical footprint in MB (task_info TASK_VM_INFO).
+    private nonisolated static func footprintMB() -> Double {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        return result == KERN_SUCCESS ? Double(info.phys_footprint) / 1_048_576 : -1
+    }
+
+    /// Export as PDF… through the menu, with the panel answered with
+    /// `url`; runs the main run loop until the write ends, ticking a 10 ms
+    /// timer. From the moment the panel answers (the user clicks Save;
+    /// making the Save panel before that is M7's and not timed), returns
+    /// the longest gap between ticks, the time taken, the peak footprint
+    /// above the start, and what the caller heard.
+    private func exportThroughMenu(_ document: TextDocument, to url: URL, header: Bool = false,
+                                   whileRunning: ((TimeInterval) -> Void)? = nil,
+                                   timeout: TimeInterval = 120) throws
+        -> (longestGap: Double, seconds: Double, peakMB: Double, results: [Bool]) {
+        var last = DispatchTime.now().uptimeNanoseconds
+        var start = Date()
+        document.pdfPanelRunner = { _, accessory, completion in
+            accessory.headerCheckbox.state = header ? .on : .off
+            accessory.changePageNumbering(accessory.headerCheckbox)
+            accessory.rewrapCheckbox.state = .on
+            accessory.changeWrappingToFit(accessory.rewrapCheckbox)
+            last = DispatchTime.now().uptimeNanoseconds
+            start = Date()
+            completion(url)
+        }
+        let delegate = DidPrintRecorder()
+        let baseMB = Self.footprintMB()
+        var peakMB = baseMB
+        var gaps: [Double] = []
+        let timer = Timer(timeInterval: 0.01, repeats: true) { _ in
+            let now = DispatchTime.now().uptimeNanoseconds
+            gaps.append(Double(now - last) / 1e6)
+            last = now
+            peakMB = max(peakMB, Self.footprintMB())
+        }
+        RunLoop.current.add(timer, forMode: .common)
+        document.print(withSettings: [:], showPrintPanel: true, delegate: delegate,
+                       didPrint: #selector(DidPrintRecorder.document(_:didPrint:contextInfo:)), contextInfo: nil)
+        // The menu action itself is one main-thread block too.
+        gaps.append(Double(DispatchTime.now().uptimeNanoseconds - last) / 1e6)
+        last = DispatchTime.now().uptimeNanoseconds
+        while delegate.results.isEmpty && Date().timeIntervalSince(start) < timeout {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+            whileRunning?(Date().timeIntervalSince(start))
+        }
+        timer.invalidate()
+        if ProcessInfo.processInfo.environment["QE_M8_GAPS"] != nil {
+            print("M8-GAPS over 30 ms: \(gaps.enumerated().filter { $0.element > 30 }.map { "#\($0.offset) of \(gaps.count): \(Int($0.element)) ms" })")
+        }
+        return (gaps.max() ?? 0, Date().timeIntervalSince(start), peakMB - baseMB, delegate.results)
+    }
+
+    /// The done-test: a 10 MB export keeps the window responsive (no
+    /// main-thread block over 100 ms in an optimized build) and writes the
+    /// whole PDF.
+    func testTenMegabyteExportKeepsTheWindowResponsive() throws {
+        let text = fixtureText(bytes: 10 * 1024 * 1024)
+        let (document, _) = try open(text, name: "ten.txt")
+        let url = pdfURL("ten")
+        let run = try exportThroughMenu(document, to: url)
+        let report = String(format: "M8-N6 10 MB Wrap to Window export: %.0f ms; longest main-thread gap %.1f ms; "
+                            + "peak footprint +%.0f MB (text %.0f MB in memory); optimized: %@",
+                            run.seconds * 1000, run.longestGap, run.peakMB,
+                            Double(document.textStorage.length * 2) / 1_048_576,
+                            _isDebugAssertConfiguration() ? "false" : "true")
+        print(report)
+        XCTAssertEqual(run.results, [true])
+        let pdf = try XCTUnwrap(PDFDocument(url: url))
+        XCTAssertEqual(pdf.pageCount, expectedPages(text, scale: rewrapScale))
+        XCTAssertTrue((pdf.page(at: 0)?.string ?? "").hasPrefix("line 00000000"))
+        XCTAssertNil(document.pdfJob)
+        if !_isDebugAssertConfiguration() {
+            XCTAssertLessThan(run.longestGap, 100, "the main thread blocked \(run.longestGap) ms during the export")
+            // Checked only in the optimized speed run: a Debug run that starts
+            // here also counts one-time font and PDF setup (user OK, 2026-10-25).
+            assertUnderTwiceTheText(run.peakMB, document)
+        }
+    }
+
+    /// The same in Wrap to Page, where the window also lays out its pages
+    /// on idle while the PDF is written.
+    func testTenMegabyteExportInWrapToPageKeepsTheWindowResponsive() throws {
+        let text = fixtureText(bytes: 10 * 1024 * 1024)
+        let (document, _) = try open(text, name: "ten-pages.txt")
+        toggle(document)
+        let url = pdfURL("ten-pages")
+        let run = try exportThroughMenu(document, to: url)
+        let report = String(format: "M8-N6 10 MB Wrap to Page export: %.0f ms; longest main-thread gap %.1f ms; "
+                            + "peak footprint +%.0f MB (text %.0f MB in memory); optimized: %@",
+                            run.seconds * 1000, run.longestGap, run.peakMB,
+                            Double(document.textStorage.length * 2) / 1_048_576,
+                            _isDebugAssertConfiguration() ? "false" : "true")
+        print(report)
+        XCTAssertEqual(run.results, [true])
+        XCTAssertTrue((try XCTUnwrap(PDFDocument(url: url)).page(at: 0)?.string ?? "").hasPrefix("line 00000000"))
+        if !_isDebugAssertConfiguration() {
+            XCTAssertLessThan(run.longestGap, 100, "the main thread blocked \(run.longestGap) ms during the export")
+        }
+        // No memory limit here: the peak also holds the window's own
+        // pages, laid out meanwhile. The next test measures the export alone.
+    }
+
+    /// M8 n6 memory in Wrap to Page (review row 7): the window's pages are
+    /// laid out first, so the peak is the export's own. Their memory is
+    /// printed too, to show where the rest of the peak above comes from.
+    func testTenMegabyteExportInWrapToPageStaysUnderTwiceTheText() throws {
+        let text = fixtureText(bytes: 10 * 1024 * 1024)
+        let (document, controller) = try open(text, name: "ten-pages-memory.txt")
+        let before = Self.footprintMB()
+        toggle(document)
+        controller.layOutWholeText()
+        let pagesMB = Self.footprintMB() - before
+        let run = try exportThroughMenu(document, to: pdfURL("ten-pages-memory"))
+        print(String(format: "M8-N6 10 MB Wrap to Page export after its pages: %.0f ms; peak footprint +%.0f MB "
+                     + "(text %.0f MB in memory); the %d pages themselves +%.0f MB; optimized: %@",
+                     run.seconds * 1000, run.peakMB, Double(document.textStorage.length * 2) / 1_048_576,
+                     controller.numberOfPages, pagesMB, _isDebugAssertConfiguration() ? "false" : "true"))
+        XCTAssertEqual(run.results, [true])
+        assertUnderTwiceTheText(run.peakMB, document)
+    }
+
+    /// M8 n6 (review row 7): the export's peak memory above its start
+    /// stays under 2x the text's size in memory (UTF-16, 2 bytes a unit).
+    private func assertUnderTwiceTheText(_ peakMB: Double, _ document: TextDocument,
+                                         file: StaticString = #filePath, line: UInt = #line) {
+        let textMB = Double(document.textStorage.length * 2) / 1_048_576
+        XCTAssertGreaterThanOrEqual(peakMB, 0, "the footprint could not be read", file: file, line: line)
+        XCTAssertLessThan(peakMB, 2 * textMB,
+                          String(format: "peak footprint +%.0f MB, over 2x the text (%.0f MB)", peakMB, textMB),
+                          file: file, line: line)
+    }
+
+    /// Pieces: text laid out in small pieces gives the same pages as one
+    /// piece, kept or laid out again to draw: the same page count, the
+    /// same text on each page and the same pixels. The text has wrapped
+    /// paragraphs, tabs, CR LF, an empty line, a line taller than a page
+    /// is not here (see the tall-line tests), and ends with a line end.
+    func testPiecesMakeTheSamePagesAsOneContainer() throws {
+        var paragraphs: [String] = []
+        for n in 0..<400 {
+            switch n % 5 {
+            case 0: paragraphs.append("short \(n)")
+            case 1: paragraphs.append("tab\t\(n)\tcell")
+            case 2: paragraphs.append(String(repeating: "a long paragraph that wraps over several lines \(n) ", count: 6))
+            case 3: paragraphs.append("")
+            default: paragraphs.append("crlf line \(n)\r")
+            }
+        }
+        let text = NSAttributedString(string: paragraphs.joined(separator: "\n") + "\n",
+                                      attributes: TextViewFactory.plainTextAttributes())
+        let layout = PageLayout.forNewDocument()
+        func pdf(pieceLength: Int, keepsAllUpTo: Int, header: Bool) throws -> PDFDocument {
+            let pagination = try PDFRenderer.Pagination(text: text, width: 300, layout: layout,
+                                                        origin: NSPoint(x: layout.leftMargin, y: layout.topMargin),
+                                                        scalesToFit: true, pieceLength: pieceLength, keepsAllUpTo: keepsAllUpTo)
+            if pieceLength < text.length { XCTAssertGreaterThanOrEqual(pagination.pieces.count, 10) }
+            let url = pdfURL("pieces-\(pieceLength)-\(keepsAllUpTo)")
+            let header = header ? PDFRenderer.Header(title: "t", date: "d") : nil
+            try PDFRenderer.write(pagination, layout: layout, header: header, to: url)
+            return try XCTUnwrap(PDFDocument(url: url))
+        }
+        func pixels(_ page: PDFPage) -> Data? {
+            page.thumbnail(of: page.bounds(for: .mediaBox).size, for: .mediaBox).tiffRepresentation
+        }
+        for header in [false, true] {
+            let one = try pdf(pieceLength: 1 << 30, keepsAllUpTo: 1 << 30, header: header)
+            XCTAssertGreaterThan(one.pageCount, 5)
+            for (pieceLength, keepsAll) in [(700, 1 << 30), (700, 0), (3_000, 0)] {
+                let pieces = try pdf(pieceLength: pieceLength, keepsAllUpTo: keepsAll, header: header)
+                XCTAssertEqual(pieces.pageCount, one.pageCount, "pieces of \(pieceLength), keep \(keepsAll)")
+                for index in 0..<min(one.pageCount, pieces.pageCount) {
+                    let a = try XCTUnwrap(one.page(at: index)), b = try XCTUnwrap(pieces.page(at: index))
+                    XCTAssertEqual(b.string, a.string, "page \(index + 1), pieces of \(pieceLength)")
+                    XCTAssertTrue(pixels(a) == pixels(b), "page \(index + 1) looks different, pieces of \(pieceLength)")
+                }
+            }
+        }
+    }
+
+    func testPiecesEndAtParagraphEnds() {
+        let string = "aaaa\nbb\r\ncccccccccc\n\ndd" as NSString
+        let pieces = PDFRenderer.Pagination.pieces(of: string, length: 3)
+        // The rest after the long paragraph is shorter than a piece: one piece.
+        XCTAssertEqual(pieces.map { string.substring(with: $0) }, ["aaaa\n", "bb\r\n", "cccccccccc\n", "\ndd"])
+        XCTAssertEqual(PDFRenderer.Pagination.pieces(of: "a\nb\nc\nd" as NSString, length: 1).map { $0.length }, [2, 2, 2, 1])
+        XCTAssertEqual(PDFRenderer.Pagination.pieces(of: "" as NSString), [NSRange(location: 0, length: 0)])
+        XCTAssertEqual(PDFRenderer.Pagination.pieces(of: "abc" as NSString, length: 10), [NSRange(location: 0, length: 3)])
+    }
+
+    /// Off the main thread, the PDF is the same as the one written on it:
+    /// both view modes, with and without the header.
+    func testBackgroundWriteMakesTheSamePDF() throws {
+        let fixture = fixtureText(bytes: TextDocument.backgroundPDFThreshold * 3 / 2)
+        for pages in [false, true] {
+            for header in [false, true] {
+                let (document, _) = try open(fixture, name: "same-\(pages)-\(header).txt")
+                if pages { toggle(document) }
+                XCTAssertGreaterThan(document.textStorage.length, TextDocument.backgroundPDFThreshold)
+                let onMain = try write(document, header: header)
+                let url = pdfURL("background")
+                let run = try exportThroughMenu(document, to: url, header: header)
+                XCTAssertEqual(run.results, [true])
+                let background = try XCTUnwrap(PDFDocument(url: url))
+                XCTAssertEqual(background.pageCount, onMain.pageCount, "pages \(pages) header \(header)")
+                XCTAssertEqual(text(of: background), text(of: onMain), "pages \(pages) header \(header)")
+            }
+        }
+    }
+
+    /// While a background write runs, Print… and Export as PDF… are off,
+    /// and the document's text can change without changing the PDF. (The
+    /// copy is taken once the attributes are read through, a moment after
+    /// Save; the typing here comes after the drawing has started.)
+    func testMenuItemsAreOffWhileWritingAndTheTextIsACopy() throws {
+        let text = fixtureText(bytes: 2 * 1024 * 1024)
+        let (document, controller) = try open(text, name: "busy.txt")
+        let file = try XCTUnwrap(MainMenu.build().item(withTitle: "File")?.submenu)
+        let printItem = try XCTUnwrap(file.item(withTitle: "Print\u{2026}"))
+        let url = pdfURL("busy")
+        var checked = false
+        let run = try exportThroughMenu(document, to: url) { _ in
+            guard !checked, let job = document.pdfJob, job.fraction > 0 else { return }
+            checked = true
+            XCTAssertFalse(document.validateMenuItem(printItem), "Print… is on while a PDF is written")
+            try? self.type("typed ", in: controller, document: document)
+        }
+        XCTAssertTrue(checked, "the write ended before the run loop turned")
+        XCTAssertEqual(run.results, [true])
+        XCTAssertTrue(document.validateMenuItem(printItem))
+        let pdf = try XCTUnwrap(PDFDocument(url: url))
+        XCTAssertTrue((pdf.page(at: 0)?.string ?? "").hasPrefix("line 00000000"), "the PDF has text typed after it started")
+        XCTAssertTrue(document.textStorage.string.hasPrefix("typed line"))
+    }
+
+    /// Cancel: no PDF, no temporary folder, and the caller hears false.
+    /// An old PDF at the target keeps its bytes.
+    func testCancelLeavesNoFileAndNoTemporaryFolder() throws {
+        let text = fixtureText(bytes: 10 * 1024 * 1024)
+        let (document, _) = try open(text, name: "cancel.txt")
+        let url = pdfURL("cancel")
+        let old = pdfURL("old")
+        let (small, _) = try open("old\n", name: "old.txt")
+        try small.writePDF(to: old, options: .init(headerAndFooter: false, wrappingToFit: true))
+        let oldBytes = try Data(contentsOf: old)
+        let folders = Mutex<[URL]>([])
+        TextDocument.testHooks.withLock { hooks in
+            hooks.pdfTemporaryFolder = { folder in folders.withLock { $0.append(folder) } }
+        }
+        defer { TextDocument.testHooks.withLock { $0.pdfTemporaryFolder = nil } }
+        for target in [url, old] {
+            var cancelled = false
+            let run = try exportThroughMenu(document, to: target) { _ in
+                guard !cancelled, let job = document.pdfJob, job.fraction > 0 else { return }
+                cancelled = true
+                job.cancel()
+            }
+            XCTAssertTrue(cancelled, "the write ended before it could be cancelled")
+            XCTAssertEqual(run.results, [false])
+            XCTAssertNil(document.pdfJob)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path), "a cancelled write left a PDF")
+        XCTAssertEqual(try Data(contentsOf: old), oldBytes, "a cancelled write changed the old PDF")
+        let made = folders.withLock { $0 }
+        XCTAssertEqual(made.count, 2)
+        for folder in made {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path), "temporary folder left: \(folder.path)")
+        }
+    }
+
+    /// Writes taking over a second show a progress sheet with a working
+    /// Cancel button. The delay is 0 here so the sheet shows at once.
+    func testProgressSheetShowsAndItsCancelButtonStopsTheWrite() throws {
+        let text = fixtureText(bytes: 10 * 1024 * 1024)
+        let (document, controller) = try open(text, name: "sheet.txt")
+        let window = try XCTUnwrap(controller.window)
+        // A sheet needs its window on screen (not key: no keys go anywhere).
+        window.orderFront(nil)
+        let savedDelay = PDFProgressSheet.delay
+        PDFProgressSheet.delay = 0
+        defer { PDFProgressSheet.delay = savedDelay }
+        let url = pdfURL("sheet")
+        var clicked = false
+        var sheetTitle = ""
+        let run = try exportThroughMenu(document, to: url) { _ in
+            guard !clicked, let sheet = window.attachedSheet,
+                  let progress = sheet.contentView?.subviews.compactMap({ $0 as? NSProgressIndicator }).first,
+                  progress.doubleValue > 0,
+                  let cancel = sheet.contentView?.subviews.compactMap({ $0 as? NSButton }).first(where: { $0.title == "Cancel" })
+            else { return }
+            sheetTitle = sheet.contentView?.subviews.compactMap { ($0 as? NSTextField)?.stringValue }.first ?? ""
+            clicked = true
+            try? self.renderSheet(sheet)
+            cancel.performClick(nil)
+        }
+        XCTAssertTrue(clicked, "no progress sheet with a moving bar and a Cancel button")
+        XCTAssertEqual(sheetTitle, "Exporting \u{201C}sheet\u{201D} as PDF\u{2026}")
+        XCTAssertEqual(run.results, [false])
+        XCTAssertNil(window.attachedSheet, "the sheet stayed")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    /// The sheet's content drawn offscreen into build/shots, for root.
+    private func renderSheet(_ sheet: NSWindow) throws {
+        let content = try XCTUnwrap(sheet.contentView)
+        let rep = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+        content.cacheDisplay(in: content.bounds, to: rep)
+        // cacheDisplay draws no window background; put the sheet's own
+        // background under it, in the sheet's light or dark look.
+        let image = NSImage(size: content.bounds.size)
+        image.lockFocus()
+        sheet.effectiveAppearance.performAsCurrentDrawingAppearance {
+            NSColor.windowBackgroundColor.setFill()
+            content.bounds.fill()
+        }
+        rep.draw(in: content.bounds, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        image.unlockFocus()
+        let tiff = try XCTUnwrap(image.tiffRepresentation)
+        let png = try XCTUnwrap(NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]))
+        let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("build/shots", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = folder.appendingPathComponent("m8-pdf-progress-sheet.png")
+        try png.write(to: url)
+        print("M8-SHOT \(url.path)")
+    }
+
+    /// Closing the document stops its write.
+    func testClosingTheDocumentCancelsTheWrite() throws {
+        let text = fixtureText(bytes: 10 * 1024 * 1024)
+        let (document, _) = try open(text, name: "close.txt")
+        let url = pdfURL("close")
+        var closed = false
+        let run = try exportThroughMenu(document, to: url) { _ in
+            guard !closed, let job = document.pdfJob, job.fraction > 0 else { return }
+            closed = true
+            document.close()
+        }
+        XCTAssertTrue(closed)
+        XCTAssertEqual(run.results, [false])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    /// M8 review row 4: a close while the attributes are still read
+    /// through on the main thread (no progress yet, no drawing started):
+    /// no PDF, no temporary folder ever made, and an old PDF keeps its bytes.
+    func testClosingDuringTheAttributeReadLeavesNothing() throws {
+        let text = fixtureText(bytes: 10 * 1024 * 1024)
+        let old = pdfURL("old")
+        let (small, _) = try open("old\n", name: "old-attr.txt")
+        try small.writePDF(to: old, options: .init(headerAndFooter: false, wrappingToFit: true))
+        let oldBytes = try Data(contentsOf: old)
+        let folders = Mutex<[URL]>([])
+        TextDocument.testHooks.withLock { hooks in
+            hooks.pdfTemporaryFolder = { folder in folders.withLock { $0.append(folder) } }
+        }
+        defer { TextDocument.testHooks.withLock { $0.pdfTemporaryFolder = nil } }
+        let fresh = pdfURL("fresh")
+        for (index, target) in [fresh, old].enumerated() {
+            let (document, _) = try open(text, name: "close-attr-\(index).txt")
+            var closed = false
+            let run = try exportThroughMenu(document, to: target) { _ in
+                guard !closed, let job = document.pdfJob else { return }
+                closed = true
+                XCTAssertEqual(job.fraction, 0, "the close came after the attribute read")
+                document.close()
+            }
+            XCTAssertTrue(closed, "the write ended before the run loop turned")
+            XCTAssertEqual(run.results, [false])
+            XCTAssertNil(document.pdfJob)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fresh.path), "a write closed early left a PDF")
+        XCTAssertEqual(try Data(contentsOf: old), oldBytes, "a write closed early changed the old PDF")
+        XCTAssertEqual(folders.withLock { $0 }, [], "a temporary folder was made after the close")
+    }
+
+    /// M8 review row 6: Cancel after the last page is drawn and checked,
+    /// just before the PDF goes into place: the old PDF keeps its bytes
+    /// and the caller does not hear success.
+    func testCancelJustBeforeTheReplaceKeepsTheOldPDF() throws {
+        let text = fixtureText(bytes: 2 * 1024 * 1024)
+        let (document, _) = try open(text, name: "late-cancel.txt")
+        let old = pdfURL("old")
+        let (small, _) = try open("old\n", name: "old-late.txt")
+        try small.writePDF(to: old, options: .init(headerAndFooter: false, wrappingToFit: true))
+        let oldBytes = try Data(contentsOf: old)
+        let job = Mutex<PDFJob?>(nil)
+        let hookRan = Mutex(false)
+        TextDocument.testHooks.withLock { hooks in
+            hooks.pdfTemporaryFile = { _ in
+                hookRan.withLock { $0 = true }
+                job.withLock { $0 }?.cancel()
+            }
+        }
+        defer { TextDocument.testHooks.withLock { $0.pdfTemporaryFile = nil } }
+        for target in [old, pdfURL("new")] {
+            hookRan.withLock { $0 = false }
+            let run = try exportThroughMenu(document, to: target) { _ in
+                if job.withLock({ $0 }) == nil, let running = document.pdfJob { job.withLock { $0 = running } }
+            }
+            job.withLock { $0 = nil }
+            XCTAssertTrue(hookRan.withLock { $0 }, "the drawn PDF was never handed to the hook")
+            XCTAssertEqual(run.results, [false], "a write cancelled before the replace reported success")
+            XCTAssertNil(document.pdfJob)
+            if target == old {
+                XCTAssertEqual(try Data(contentsOf: old), oldBytes, "a cancelled write replaced the old PDF")
+            } else {
+                XCTAssertFalse(FileManager.default.fileExists(atPath: target.path), "a cancelled write left a PDF")
+            }
+        }
+    }
+
+    /// The renderer's own memory and time for 100 MB (M8 n6), when
+    /// TEST_RUNNER_QE_M8_PDF_RENDERER is set: one piece (as in M7) against
+    /// pieces, on a background thread, footprint sampled every millisecond.
+    func testRendererMemory() throws {
+        guard let which = ProcessInfo.processInfo.environment["QE_M8_PDF_RENDERER"] else { return }
+        let text = NSAttributedString(string: fixtureText(bytes: 100 * 1024 * 1024), attributes: TextViewFactory.plainTextAttributes())
+        // Touch the text once so its own first-pass cost is not counted.
+        var index = 0
+        while index < text.length { var run = NSRange(); _ = text.attributes(at: index, effectiveRange: &run); index = NSMaxRange(run) }
+        let layout = PageLayout.forNewDocument()
+        // One variant per test run (each in a fresh process), as memory a
+        // run frees stays with the process and would hide the next peak.
+        let variants = [("pieces", PDFRenderer.Pagination.pieceLength), ("one piece (M7)", 1 << 30)]
+        for (name, pieceLength) in variants where which == "all" || name.hasPrefix(which) {
+            nonisolated(unsafe) let source = text
+            let base = Self.footprintMB()
+            nonisolated(unsafe) var peak = base
+            let sampling = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInteractive))
+            sampling.schedule(deadline: .now(), repeating: .milliseconds(1))
+            sampling.setEventHandler { @Sendable in peak = max(peak, Self.footprintMB()) }
+            sampling.resume()
+            let url = pdfURL("renderer")
+            nonisolated(unsafe) var pages = 0
+            nonisolated(unsafe) var failure: Error?
+            let start = Date()
+            let done = DispatchSemaphore(value: 0)
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    let pagination = try PDFRenderer.Pagination(text: source, width: layout.documentSizeInPage.width, layout: layout,
+                                                                origin: NSPoint(x: layout.leftMargin, y: layout.topMargin),
+                                                                scalesToFit: true, job: PDFJob(), pieceLength: pieceLength)
+                    pages = try PDFRenderer.write(pagination, layout: layout, header: nil, to: url, job: PDFJob())
+                } catch {
+                    failure = error
+                }
+                done.signal()
+            }
+            done.wait()
+            sampling.cancel()
+            if let failure { throw failure }
+            print(String(format: "M8-N6-RENDERER 100 MB %@: %.0f ms, %d pages, peak footprint +%.0f MB (text 200 MB in memory)",
+                         name, Date().timeIntervalSince(start) * 1000, pages, peak - base))
+            try FileManager.default.removeItem(at: url)
+        }
+    }
+
+    /// Measurements for the M8 report, when TEST_RUNNER_QE_M8_PDF_MATRIX
+    /// is set: 1, 10 and 100 MB in both view modes, on the main thread
+    /// (the M7 path, 1 and 10 MB only) and through the menu (background).
+    func testPDFMeasurementMatrix() throws {
+        guard ProcessInfo.processInfo.environment["QE_M8_PDF_MATRIX"] != nil else { return }
+        for megabytes in [1, 10, 100] {
+            let text = fixtureText(bytes: megabytes * 1024 * 1024)
+            for pages in [false, true] {
+                let mode = pages ? "Wrap to Page" : "Wrap to Window"
+                if megabytes <= 10 {
+                    let (document, _) = try open(text, name: "main-\(megabytes)-\(pages).txt")
+                    if pages { toggle(document) }
+                    let base = Self.footprintMB()
+                    let start = Date()
+                    try document.writePDF(to: pdfURL("main"), options: .init(headerAndFooter: false, wrappingToFit: true))
+                    print(String(format: "M8-N6-MATRIX %d MB %@ main thread (M7 path): %.0f ms, one block; footprint after +%.0f MB",
+                                 megabytes, mode, Date().timeIntervalSince(start) * 1000, Self.footprintMB() - base))
+                    document.close()
+                    documents.removeAll { $0 === document }
+                }
+                let (document, _) = try open(text, name: "bg-\(megabytes)-\(pages).txt")
+                if pages { toggle(document) }
+                let run = try exportThroughMenu(document, to: pdfURL("bg"), timeout: 900)
+                print(String(format: "M8-N6-MATRIX %d MB %@ background: %.0f ms; longest main-thread gap %.1f ms; peak footprint +%.0f MB; text in memory %.0f MB; result %@",
+                             megabytes, mode, run.seconds * 1000, run.longestGap, run.peakMB,
+                             Double(document.textStorage.length * 2) / 1_048_576, "\(run.results)"))
+                assertUnderTwiceTheText(run.peakMB, document)
+                document.close()
+                documents.removeAll { $0 === document }
+            }
+        }
+    }
 }
 
 /// Records NSDocument's didPrint callbacks.
