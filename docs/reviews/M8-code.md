@@ -57,3 +57,15 @@ Astra (runner) and a fresh Opus reviewer re-read the change on 2026-10-25. The f
 | 37 | Row 20 tests do not run the real actions: Replace All, `duplicate()`, paste with a filled pasteboard, a drop | Opus, Astra | Confirmed | Accept |
 | 38 | Stale clone cleanup trusts the pid alone; a reused pid keeps a dead folder | Astra, Opus (uncertain) | Confirmed | Accept: record the process start time with the pid |
 | 39 | Temp-folder cleanup by macOS while a window is open for days; undo during a fill in an editable large file; Save As to a new place during the background check | both (uncertain) | Not shown | Follow-ups; the third is covered if rows 27 and 30 hold |
+
+## Very large files, final narrow review (after rows 27-38)
+
+Scope: only byte loss, hangs, crashes or stuck documents. Astra found none in scope. Opus found one.
+
+| # | Finding | From | Root check | Decision |
+|---|---|---|---|---|
+| 40 | Edits typed while a reload checks the file can be lost: the document is "reloading" from the start, autosave returns success without writing, but views stop taking keys only when the fill starts; Close then closes without saving | Opus | TextDocument.swift:447, 551-598, 717-719, 776-779: confirmed by reading | Accept: views stop taking edits when the reload starts; test with a hook that holds the check part |
+| 41 | The clone taken after a save runs without file access; another app's write in that gap is taken as "unchanged" and later overwritten without a warning | Opus (uncertain) | TextDocument.swift:766-772: plausible | Accept: take that clone inside the save's file access; test with a hook in the gap |
+| 42 | No test keeps the PDF Save panel open during a reload, or checks that cancelling the panel lets the reload go on | Astra | Confirmed missing | Accept |
+| 43 | Done-test 4 needs n=5 in a signed Release build | Astra | Correct | Root measures |
+| 44 | Byte count is kept after Save As in another encoding; no-clone reload reads after file access ends; lossy flag cleared by overwrite confirmation | Opus, Astra | Not in scope | Follow-ups |
