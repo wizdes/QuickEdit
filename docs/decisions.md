@@ -41,6 +41,12 @@ Options: A, full editing at any size, fix the open costs; B, A's fixes plus a si
 - Astra: B. Both limits are missed; remove the UTF-8 copy first; pick the limit from measurements (512 MB is a starting point); Save As must keep the bytes.
 Result: B, 2 of 2. Read-only alone does not pass done-test 4; the open path must still meet both limits.
 
+### V4 (2026-10-25): layout of the Settings > Keyboard tab (U2)?
+Options (mockups: three rendered windows, 440 pt wide): A, one flat table at 11 pt with a header row per menu; B, a search field over an outline with one group per menu, 13 pt, 24 pt rows; C, a menu pop-up that shows one menu's commands, 32 pt rows with key caps.
+- Fable: B. Search by name or by key reaches any of 59 commands fastest; NSOutlineView plus NSSearchField is stock AppKit and works with VoiceOver; C's key caps are custom drawing and the riskiest build.
+- Astra: B. Search does not need the menu name; 13 pt and 24 pt rows fit 440 pt; more work than A, worth it for 59 commands.
+Result: B, 2 of 2. Changes both or one asked for, all taken: no popover, the clash message stays on screen under the list and VoiceOver announces it without moving focus (both); groups start expanded and search shows matches flat (Fable); Edit's submenus become one level, as "Find > Find..." rows (Fable); search also matches typed key names such as "cmd+shift+p" (Astra); recording and per-row reset work from the keyboard with spoken labels naming the command (Astra); the button is "Restore Keyboard Defaults" (Astra).
+
 ## Choices to check
 - Reference build: the Apple copy (version 309) is the base, not zadr (285), because it is newer and has autosave, versions and Base.lproj. zadr is kept for its ARC changes.
 - App Sandbox stays off until M9, then goes on with a full test re-run. Reason: tests and timing open files anywhere; the sandbox would block them before the rest works.
