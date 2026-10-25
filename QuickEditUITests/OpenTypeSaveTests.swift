@@ -1,0 +1,142 @@
+import XCTest
+
+/// End to end: open, type, save, and the bytes on disk match.
+final class OpenTypeSaveTests: QuickEditUITestCase {
+    /// Plan n3 step 3, first test.
+    func testOpenTypeSaveExistingFile() throws {
+        let url = try fixtureFolder("open-type-save").appendingPathComponent("hello.txt")
+        waitForBytes(url, Array("abc\n".utf8))
+        launch(opening: url.path)
+        XCTAssertTrue(textView.waitForExistence(timeout: 10))
+        XCTAssertEqual(text, "abc\n")
+        safePress(.downArrow, .command) // end of document
+        safeType("XYZ")
+        safePress("s", .command)
+        waitForBytes(url, Array("abc\nXYZ".utf8))
+    }
+
+    /// Plan n3 step 3, second test.
+    func testNewDocumentSaveAs() throws {
+        let folder = try fixtureFolder("new-save")
+        launch()
+        XCTAssertTrue(textView.waitForExistence(timeout: 10))
+        let windowsBefore = app.windows.count
+        safePress("n", .command)
+        // M1 review row 5: New must make a new window, not reuse the old one.
+        let more = NSPredicate { _, _ in self.app.windows.count == windowsBefore + 1 }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: more, object: nil)], timeout: 10),
+                       .completed, "Cmd+N did not add a window (had \(windowsBefore), now \(app.windows.count))")
+        let newWindow = app.windows.firstMatch // the front window is the new one
+        let firstTitle = app.windows.element(boundBy: 1).title
+        XCTAssertNotEqual(newWindow.title, firstTitle, "the front window is not a new document")
+        safeType("hi")
+        XCTAssertEqual(newWindow.textViews.firstMatch.value as? String, "hi", "typing did not go to the new window")
+        XCTAssertEqual(app.windows.element(boundBy: 1).textViews.firstMatch.value as? String, "",
+                       "typing changed the first window")
+        safePress("s", .command)
+        fillSavePanel(name: "greeting", folder: folder)
+        waitForBytes(folder.appendingPathComponent("greeting.txt"), Array("hi".utf8))
+    }
+
+    /// Root item 1: save is an undo boundary, and edits after a save survive quit.
+    func testSaveBoundaryUndoAndQuitKeepsEdits() throws {
+        let url = try fixtureFolder("boundary").appendingPathComponent("boundary.txt")
+        waitForBytes(url, Array("start\n".utf8))
+        launch(opening: url.path)
+        XCTAssertTrue(textView.waitForExistence(timeout: 10))
+        safePress(.downArrow, .command)
+        safeType("saved")
+        safePress("s", .command)
+        waitForBytes(url, Array("start\nsaved".utf8))
+        XCTAssertFalse(isEdited(), "document still marked edited right after Cmd+S")
+
+        safeType(" more")
+        XCTAssertEqual(text, "start\nsaved more")
+        XCTAssertTrue(isEdited(), "typing after a save must mark the document edited")
+
+        // One Undo goes back to the text as saved, not further.
+        safePress("z", .command)
+        XCTAssertEqual(text, "start\nsaved", "one Undo after the save restores the post-save text")
+        safePress("z", [.command, .shift])
+        XCTAssertEqual(text, "start\nsaved more")
+
+        safeType(" end")
+        safePress("q", .command)
+        XCTAssertTrue(app.wait(for: .notRunning, timeout: 15), "QuickEdit did not quit")
+        waitForBytes(url, Array("start\nsaved more end".utf8))
+
+        launch(opening: url.path)
+        XCTAssertTrue(textView.waitForExistence(timeout: 10))
+        XCTAssertEqual(text, "start\nsaved more end")
+        waitForBytes(url, Array("start\nsaved more end".utf8))
+    }
+
+    /// Root item 4: the ".txt" checkbox in the Save panel.
+    func testSavePanelExtensionCheckboxOnAddsTxt() throws {
+        let folder = try fixtureFolder("ext-on")
+        try saveNewDocument(text: "on", name: "plain", folder: folder, addTxtExtension: true)
+        waitForBytes(folder.appendingPathComponent("plain.txt"), Array("on".utf8))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("plain").path))
+    }
+
+    func testSavePanelExtensionCheckboxOffAddsNothing() throws {
+        let folder = try fixtureFolder("ext-off")
+        try saveNewDocument(text: "off", name: "bare", folder: folder, addTxtExtension: false)
+        waitForBytes(folder.appendingPathComponent("bare"), Array("off".utf8))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("bare.txt").path))
+    }
+
+    func testSavePanelKeepsTypedExtension() throws {
+        let folder = try fixtureFolder("ext-md")
+        try saveNewDocument(text: "md", name: "x.md", folder: folder, addTxtExtension: true)
+        waitForBytes(folder.appendingPathComponent("x.md"), Array("md".utf8))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("x.md.txt").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("x.txt").path))
+    }
+
+    /// Root item 5: File > Open with a typed path.
+    func testOpenPanelOpensFile() throws {
+        let url = try fixtureFolder("open-panel").appendingPathComponent("openme.txt")
+        launch()
+        safePress("o", .command)
+        let panel = app.sheets.firstMatch.exists ? app.sheets.firstMatch : app.dialogs.firstMatch
+        XCTAssertTrue(panel.waitForExistence(timeout: 10) || app.windows["Open"].waitForExistence(timeout: 5),
+                      "no Open panel")
+        safePress("g", [.command, .shift])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        safeType(url.path)
+        safePress(.return, [])
+        RunLoop.current.run(until: Date().addingTimeInterval(1.0))
+        safePress(.return, [])
+        let window = app.windows.matching(NSPredicate(format: "title BEGINSWITH 'openme'")).firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 10),
+                      "no window titled openme; titles: \(app.windows.allElementsBoundByIndex.map { $0.title })")
+        XCTAssertEqual(window.textViews.firstMatch.value as? String, "opened by the Open panel\n")
+    }
+
+    // MARK: Helpers
+
+    private func saveNewDocument(text typed: String, name: String, folder: URL, addTxtExtension: Bool) throws {
+        launch()
+        XCTAssertTrue(textView.waitForExistence(timeout: 10))
+        textView.click()
+        safeType(typed)
+        safePress("s", .command)
+        fillSavePanel(name: name, folder: folder, addTxtExtension: addTxtExtension)
+    }
+
+    /// The front window's "edited" state, read from its close button the way
+    /// VoiceOver does, or from the "Edited" marker in the title. On macOS 27
+    /// the marker is the title's document-actions menu button, titled "Edited".
+    private func isEdited() -> Bool {
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        let window = app.windows.firstMatch
+        if window.title.contains("Edited") { return true }
+        if window.menuButtons["Edited"].exists { return true }
+        let close = window.buttons[XCUIIdentifierCloseWindow]
+        if close.exists, let value = close.value as? String, value.localizedCaseInsensitiveContains("edited") {
+            return true
+        }
+        return window.staticTexts["Edited"].exists
+    }
+}

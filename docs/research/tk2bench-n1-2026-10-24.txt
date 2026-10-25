@@ -1,0 +1,85 @@
+Sat Oct 24 09:50:42 PDT 2026
+ProductName:		macOS
+ProductVersion:		27.0.1
+BuildVersion:		26A434
+Mac14,3
+memsize: 8589934592
+load: { 18.43 10.97 7.65 }
+screen: LOCKED (displays may not reach the screen; see draws_* and window_visible)
+median [min-max] over runs; times in ms, memory in MiB
+
+== 100mb.txt
+metric                TextKit 1                         TextKit 2
+screen_locked         1.00                              1.00
+font_size             11.00                             11.00
+window_visible        0.00                              0.00
+mem_start_mib         17.81                             17.83
+peak_start_mib        17.86                             17.88
+read_ms               87.08                             50.85
+open_ms               59.01                             26.52
+open_set_ms           28.99                             19.11
+open_layout_ms        0.00                              3.02
+open_display_ms       30.02                             4.38
+draws_open            1.00                              1.00
+mem_open_mib          335.08                            327.31
+peak_open_mib         335.11                            327.31
+chars                 104857600.00                      104857600.00
+jump_ms               30.96                             53.44
+jump_scroll_ms        24.49                             20.10
+jump_layout_ms        0.01                              4.04
+jump_display_ms       6.47                              29.30
+draws_jump            1.00                              1.00
+jump_at_end           1.00                              1.00
+doc_height_px         22937410.00                       19755801.00
+mem_jump_mib          336.08                            335.60
+peak_jump_mib         336.13                            335.63
+type_keys_done        200.00                            200.00
+type_stop_reason      0.00                              0.00
+type_total_s          0.81                              0.62
+type_p50_ms           2.46                              1.44
+type_p95_ms           4.19                              2.01
+type_max_ms           10.12                             3.56
+type_mean_ms          2.47                              1.56
+draws_type            200.00                            4.00
+mem_type_mib          339.72                            353.11
+peak_type_mib         340.02                            353.14
+tk2_kept              0.00                              1.00
+worker_exit           0.00                              0.00
+
+== long-line-10mb.txt
+metric                TextKit 1                         TextKit 2
+screen_locked         1.00                              1.00
+font_size             11.00                             11.00
+window_visible        0.00                              0.00
+mem_start_mib         17.75                             18.14
+peak_start_mib        17.81                             18.19
+read_ms               7.38                              7.14
+open_ms               1767.13                           2773.09
+open_set_ms           1756.20                           57.20
+open_layout_ms        0.00                              928.88
+open_display_ms       10.93                             1787.01
+draws_open            1.00                              1.00
+mem_open_mib          434.30                            934.55
+peak_open_mib         434.33                            962.80
+chars                 10485760.00                       10485760.00
+jump_ms               11.62                             2112.35
+jump_scroll_ms        7.74                              37.59
+jump_layout_ms        0.00                              45.04
+jump_display_ms       3.88                              2029.72
+draws_jump            1.00                              1.00
+jump_at_end           1.00                              1.00
+doc_height_px         1842100.00                        1842100.00
+mem_jump_mib          435.92                            1058.49
+peak_jump_mib         435.95                            1212.55
+type_keys_done        200.00                            4.00
+type_stop_reason      0.00                              2.00
+type_total_s          5.06                              12.55
+type_p50_ms           23.41                             3116.32
+type_p95_ms           23.99                             3175.91
+type_max_ms           60.48                             3175.91
+type_mean_ms          23.70                             3137.30
+draws_type            200.00                            0.00
+mem_type_mib          627.31                            4462.35
+peak_type_mib         627.35                            4462.40
+tk2_kept              0.00                              1.00
+worker_exit           0.00                              0.00

@@ -8,3 +8,4 @@ builds/*.dmg
 xcuserdata/
 bench/fixtures/
 bench/bin/
+QuickEdit.xcodeproj/
