@@ -11,6 +11,12 @@ Options: A, TextKit 2 everywhere (Wrap to Page redrawn as one tall view). B, Tex
 - Result: **B, 2 of 2.** This replaces the plan's "TextKit 2" wording (user decision 2 named TextKit 2 inside the recommended option; the user's own rule says the vote decides).
 - What would reopen it (both voters): a Release benchmark on this Mac where TextKit 2 opens a 100 MB file (short lines and one giant paragraph) and jumps to the end with lower p95 time and lower peak memory than TextKit 1. M8 runs that benchmark.
 
+### V1 check (2026-10-24): TextKit 2 benchmark, n=5, Release, this Mac (load 4.9, screen unlocked)
+Medians, TextKit 1 vs TextKit 2 (full table: docs/research/tk2bench-n5.txt):
+- 100 MB short lines: open+display 27 vs 17 ms; jump to end 11.9 vs 20.1 ms; typing p95 14.3 vs 1.7 ms; peak memory about 336-353 MiB both.
+- 10 MB one line: open+display 12 vs 1,965 ms; jump to end 20 vs 2,315 ms; typing p50 26 vs 3,596 ms; TextKit 2 hit the 4 GiB cap after 4 of 200 keys (4.46 GB).
+- Result: V1 stays closed (TextKit 1). The reopen rule needed TextKit 2 to win on both fixtures; it loses badly on the one-line file. Follow-up for M8: TextKit 1's typing p95 on 100 MB (14.3 ms) is higher than TextKit 2's, though under the 36 ms limit.
+
 ### V2 (2026-10-24): what should "Automatic" encoding detection do?
 Options: A, match AppKit exactly (xattr, BOM, UTF-8, else Mac Roman; a stale xattr refuses to open), like TextEdit. B, add a guess with the encodings list as hints. C, add a guess with macOS's own detector, skip a stale xattr.
 - Astra: **A**. Matching TextEdit is goal 1; a byte-exact round trip does not prove the shown text is right; the Open panel already lets users pick.
