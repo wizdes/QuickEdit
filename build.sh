@@ -342,6 +342,51 @@ case "$cmd" in
             || die "the 1 GB and 512 MB open tests did not run optimized (log: $TEST_LOG)"
         echo "SPEED: PASS"
         ;;
+    quick)
+        # The check for each change (user, 2026-10-25: under 10 minutes). The
+        # full run (./build.sh test, about 25 min) stays for releases.
+        # Keeps: the raw-typing lint; every unit test class but the typing
+        # speed one; the UI tests in QUICK_UI_TESTS, which guard file bytes
+        # and the open, type, save, close and find flows; and any UI test
+        # class named in QUICK_UI_CLASSES whose file exists.
+        # Leaves out: launchbench-test.sh (4.5 min, checks the race harness),
+        # build-sh-test.sh, TypingSpeedTests, and the slow layout, encoding
+        # panel, PDF, restoration and screenshot UI tests.
+        mkdir -p "$BUILD"
+        QE_SHELL_TESTS_DIR="$BUILD/quick-shell-tests"
+        rm -rf "$QE_SHELL_TESTS_DIR"; mkdir -p "$QE_SHELL_TESTS_DIR"
+        ln -s "$ROOT/bench/tests/raw-typing-lint-test.sh" "$QE_SHELL_TESTS_DIR/"
+        [ -e "$ROOT/bench/tests/sandbox-release-test.sh" ] \
+            && ln -s "$ROOT/bench/tests/sandbox-release-test.sh" "$QE_SHELL_TESTS_DIR/"
+        export QE_SHELL_TESTS_DIR
+        run_shell_tests
+        quick=""
+        for file in "$ROOT"/QuickEditTests/*Tests.swift; do
+            name="$(basename "$file" .swift)"
+            [ "$name" = TypingSpeedTests ] && continue
+            quick+=" QuickEditTests/$name"
+        done
+        QUICK_UI_TESTS="OpenTypeSaveTests/testOpenTypeSaveExistingFile
+            OpenTypeSaveTests/testNewDocumentSaveAs
+            OpenTypeSaveTests/testSaveBoundaryUndoAndQuitKeepsEdits
+            DocumentLifeTests/testClosingAnEditedUntitledDocumentAsksAndDeleteCloses
+            DocumentLifeTests/testClosingANamedEditedDocumentSavesWithoutAsking
+            ExternalChangeTests/testEditedDocumentShowsConflictOnSave
+            FindAndLineTests/testTypingInFindBarFindsAMatch
+            FindAndLineTests/testCopyPasteUndoRedoCutInTheKeyWindow
+            WindowsAndMenusTests/testOpenRecentListsAnOpenedFile"
+        QUICK_UI_CLASSES="ShortcutUITests AccessibilityAuditTests SandboxUITests"
+        if ui_tests_possible; then
+            for t in $QUICK_UI_TESTS; do quick+=" QuickEditUITests/$t"; done
+            for c in $QUICK_UI_CLASSES; do
+                [ -e "$ROOT/QuickEditUITests/$c.swift" ] && quick+=" QuickEditUITests/$c"
+            done
+        else
+            echo "QUICK: UI tests NOT RUN (reason above); unit tests only" >&2
+        fi
+        QE_TEST_TIMEOUT="${QE_TEST_TIMEOUT:-600}" run_tests "$quick" quick
+        ui_tests_possible >/dev/null 2>&1 || die "UI tests not run, so ./build.sh quick cannot pass"
+        ;;
     uicheck)
         # Only the check that ./build.sh test runs before any UI test.
         ui_tests_possible || die "UI tests cannot run (reason above)"

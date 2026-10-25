@@ -187,7 +187,7 @@ final class M6ReviewFixTests: XCTestCase {
             view = current.nextKeyView
         }
         XCTAssertTrue(view === controller.checkboxes[.showPageBreaks], "the loop closes")
-        XCTAssertEqual(seen.count, 12, "Wrap, Width, Height, Change…, 8 options")
+        XCTAssertEqual(seen.count, 13, "Wrap, Paper size, Width, Height, Change…, 8 options")
         // Open and Save: the .txt checkbox, then both pop-ups, and back.
         let txt = try XCTUnwrap(controller.checkboxes[.addExtensionToNewPlainTextFiles])
         XCTAssertTrue(txt.nextKeyView === controller.openEncodingPopUp)

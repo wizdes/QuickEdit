@@ -40,7 +40,7 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(window.contentView?.frame.width, 440)
 
         let tabs = try XCTUnwrap(controller.tabView)
-        XCTAssertEqual(tabs.tabViewItems.map(\.label), ["New Document", "Open and Save"])
+        XCTAssertEqual(tabs.tabViewItems.map(\.label), ["New Document", "Open and Save", "Keyboard"])
 
         let titles = Dictionary(uniqueKeysWithValues: controller.checkboxes.map { ($0.key, $0.value.title) })
         XCTAssertEqual(titles, [

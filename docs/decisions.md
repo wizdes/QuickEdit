@@ -4,6 +4,8 @@ Critical questions go to Astra and Fable. The option with the most votes wins; r
 
 ## User decisions
 
+- U7 (2026-10-25): two existing tests updated for planned M9 changes: SettingsTests expects 3 tabs (adds Keyboard); M6ReviewFixTests expects 13 Tab stops (adds Paper size).
+- U6 (2026-10-25): `./build.sh quick` (under 10 minutes: lint, unit tests but typing speed, 9 critical UI tests and the M9 UI test classes) is the check for each change. The full `./build.sh test` (about 25 minutes) runs only for a release.
 - U5 (2026-10-25): a test already listed as flaky in POST_MVP.md that fails in a full run and passes when run again alone counts as passing (first case: `EditActionsTests.testStartAndStopSpeakingDriveTheSpeechSynthesizer` in the M9 sandbox run). Record each such retry in docs/STATE.md. Also: go on from M9 into M10 without stopping.
 - U4 (2026-10-25): the Settings > Keyboard tab is mockup A, one flat table with a header row per menu (`docs/mockups/M9-keyboard.html`). This overrides vote V4 (B). Kept from the V4 changes because they fit A: the clash message stays on screen under the table and VoiceOver announces it; Edit's submenus are one level; recording and per-row reset work from the keyboard with spoken labels naming the command; the button is "Restore Keyboard Defaults". Not taken: search and folding groups (A has neither).
 - U3 (2026-10-25): skip AppleScript and QuickEdit's own Services in M9. The Services menu that macOS adds by itself stays.

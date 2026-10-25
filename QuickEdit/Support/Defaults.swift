@@ -31,7 +31,34 @@ enum Defaults {
     /// Tests put a suite of their own here, so they never write the user's
     /// real settings (M6 review row 14). Set only on the main thread, before
     /// the code under test runs; read from any thread.
-    nonisolated(unsafe) static var store: UserDefaults = .standard
+    nonisolated(unsafe) static var store: UserDefaults = launchStore(arguments: ProcessInfo.processInfo.arguments)
+
+    /// `.standard`, except in a Debug build launched with
+    /// `-QETestDefaultsSuite <name>`: then that suite, so a UI test can
+    /// change settings and relaunch without touching the user's real
+    /// settings. `-QETestDefaultsSuiteReset YES` empties the suite first.
+    static func launchStore(arguments: [String]) -> UserDefaults {
+        #if DEBUG
+        if let index = arguments.firstIndex(of: "-QETestDefaultsSuite"), index + 1 < arguments.count {
+            let name = arguments[index + 1]
+            guard let suite = UserDefaults(suiteName: name) else {
+                FileHandle.standardError.write(Data("QuickEdit: -QETestDefaultsSuite \(name) cannot be opened; using the standard settings\n".utf8))
+                return .standard
+            }
+            if let reset = arguments.firstIndex(of: "-QETestDefaultsSuiteReset"), reset + 1 < arguments.count,
+               arguments[reset + 1] == "YES" {
+                suite.removePersistentDomain(forName: name)
+            }
+            return suite
+        }
+        #endif
+        return .standard
+    }
+
+    /// Settings > Keyboard (M9, user decision U2): the user's changed
+    /// shortcuts only, command id to `KeyShortcut.storedValue`. Not
+    /// registered: the default set lives in MainMenu.swift.
+    static let keyboardShortcutsKey = "KeyboardShortcuts"
 
     /// Settings > New Document > Paper size (M7): a `PaperSize` raw value.
     /// Not a TextEdit key (TextEdit took the size from Page Setup), so it
@@ -77,13 +104,17 @@ enum Defaults {
     }
 
     /// Settings > "Restore All Defaults" (reference/apple/Preferences.m:182-199):
-    /// every registered key goes back to its registered value, and the plain
+    /// every registered key goes back to its registered value, every custom
+    /// keyboard shortcut goes, and the plain
     /// font goes back to the system's fixed-pitch font. `Encodings` has no
     /// registered value, so the encodings list stays, as in TextEdit.
     @MainActor
     static func restoreAll() {
         let defaults = store
         for key in registeredValues().keys { defaults.removeObject(forKey: key) }
+        // The Keyboard tab is part of Settings, so its changes go too; the
+        // caller re-applies the menu bar's shortcuts.
+        defaults.removeObject(forKey: keyboardShortcutsKey)
         NSFont.setUserFixedPitch(nil)
     }
 
