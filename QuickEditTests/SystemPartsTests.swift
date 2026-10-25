@@ -1,10 +1,11 @@
 import AppKit
+import QuickLookThumbnailing
 import XCTest
 @testable import QuickEdit
 
 /// M9 n2: the parts macOS gives an app (docs/parity.md P71 to P73): drag
 /// and drop, Share, Writing Tools, Services, keyboard access, Quick Look.
-/// The sandbox is off in these tests (node n1 turns it on later).
+/// Since M9 n1 the test host runs sandboxed.
 @MainActor
 final class SystemPartsTests: XCTestCase {
     private var folder: URL!
@@ -265,7 +266,12 @@ final class SystemPartsTests: XCTestCase {
 
     // MARK: 6. Quick Look
 
-    /// macOS makes a thumbnail of a file QuickEdit saved (qlmanage -t).
+    /// macOS makes a thumbnail of a file QuickEdit saved. M9 n1: the test
+    /// host is sandboxed, and `qlmanage -t` cannot run from it (measured
+    /// 2026-10-25: "[Sandbox] Setting up sandbox for qlmanage failed,
+    /// exiting!", exit 255), so the test asks the same system Quick Look
+    /// service through QLThumbnailGenerator. Only a real thumbnail counts,
+    /// never the file's icon.
     func testQuickLookMakesAThumbnailOfASavedFile() async throws {
         let (document, _) = try untitled()
         document.textStorage.replaceCharacters(in: NSRange(location: 0, length: 0), with: "Quick Look sees this\n")
@@ -274,25 +280,11 @@ final class SystemPartsTests: XCTestCase {
             document.save(to: url, ofType: TextDocument.plainTextType, for: .saveAsOperation) { continuation.resume(returning: $0) }
         }
         XCTAssertNil(error)
-        let out = folder.appendingPathComponent("thumbs", isDirectory: true)
-        try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/qlmanage")
-        process.arguments = ["-t", "-s", "128", "-o", out.path, url.path]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        let deadline = Date().addingTimeInterval(30)
-        while process.isRunning && Date() < deadline { try await Task.sleep(nanoseconds: 100_000_000) }
-        if process.isRunning {
-            process.terminate()
-            XCTFail("qlmanage did not finish in 30 s")
-            return
-        }
-        XCTAssertEqual(process.terminationStatus, 0)
-        let thumb = out.appendingPathComponent("look.txt.png")
-        let image = try XCTUnwrap(NSImage(contentsOf: thumb), "no thumbnail at \(thumb.path)")
-        XCTAssertGreaterThan(image.size.width, 0)
+        let request = QLThumbnailGenerator.Request(fileAt: url, size: CGSize(width: 128, height: 128), scale: 1,
+                                                   representationTypes: .thumbnail)
+        let thumbnail = try await QLThumbnailGenerator.shared.generateBestRepresentation(for: request)
+        XCTAssertEqual(thumbnail.type, .thumbnail, "Quick Look gave \(thumbnail.type.rawValue), not a thumbnail")
+        XCTAssertGreaterThan(thumbnail.nsImage.size.width, 0)
     }
 }
 

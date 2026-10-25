@@ -4,7 +4,10 @@ Critical questions go to Astra and Fable. The option with the most votes wins; r
 
 ## User decisions
 
+- U10 (2026-10-25, root under U9): `PrintTests.testTenMegabyteExportInWrapToPageStaysUnderTwiceTheText` checks its 2x memory limit only in the optimized speed run, like its Wrap to Window sister. Debug values: +16 and +19 MB with the sandbox off, +52 MB with it on (limit 40 MB). The release speed run decides whether the sandbox breaks the real limit.
+- U9 (2026-10-25, user): for major changes and test changes, do not wait on the user; take root's recommendation, record it here, and continue.
 - U8 (2026-10-25): the accessibility audit keeps its two skips (contrast, which other apps' floating windows made flaky, and AppKit's element-less "Parent/Child mismatch" from the shared text editor). In their place, a unit test checks text contrast at 4.5:1 or better, light and dark, in every window the audit covers: the document window, every Settings tab and Select Line. Done-test 1 counts as met with that note.
+- Quick Look test (2026-10-25, user OK): it asks Quick Look through QLThumbnailGenerator instead of `qlmanage -t`, which cannot start inside the sandbox.
 - U7 (2026-10-25): two existing tests updated for planned M9 changes: SettingsTests expects 3 tabs (adds Keyboard); M6ReviewFixTests expects 13 Tab stops (adds Paper size).
 - U6 (2026-10-25): `./build.sh quick` (under 10 minutes: lint, unit tests but typing speed, 9 critical UI tests and the M9 UI test classes) is the check for each change. The full `./build.sh test` (about 25 minutes) runs only for a release.
 - U5 (2026-10-25): a test already listed as flaky in POST_MVP.md that fails in a full run and passes when run again alone counts as passing (first case: `EditActionsTests.testStartAndStopSpeakingDriveTheSpeechSynthesizer` in the M9 sandbox run). Record each such retry in docs/STATE.md. Also: go on from M9 into M10 without stopping.

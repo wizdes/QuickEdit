@@ -413,10 +413,7 @@ final class PageModeTests: XCTestCase {
 
     // MARK: Renders (read by root)
 
-    private static var shotsFolder: URL {
-        URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("build/shots", isDirectory: true)
-    }
+    private static var shotsFolder: URL { TestShots.folder }
 
     @discardableResult
     private func render(_ controller: DocumentWindowController, _ name: String) throws -> URL {

@@ -42,8 +42,27 @@ targets:
         CODE_SIGN_ENTITLEMENTS: QuickEdit/Resources/QuickEdit.entitlements
         ENABLE_HARDENED_RUNTIME: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: ""
-        ENABLE_APP_SANDBOX: NO
-        ENABLE_USER_SELECTED_FILES: ""
+        ENABLE_APP_SANDBOX: YES
+        ENABLE_USER_SELECTED_FILES: readwrite
+      configs:
+        # The tests run the Debug app sandboxed. Its own bundle ID gives it its
+        # own container and settings, so test runs never touch the user's
+        # real ~/Library/Containers/dev.yili.QuickEdit or its settings.
+        # container-migration.plist names the user's real settings file, so
+        # the Debug app must never carry it: its first launch would move that
+        # file into the Debug container. The script below fails the build if
+        # it slips in anyway.
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: dev.yili.QuickEdit.debug
+          EXCLUDED_SOURCE_FILE_NAMES: container-migration.plist
+    postBuildScripts:
+      - name: Debug app has no container-migration.plist
+        basedOnDependencyAnalysis: false
+        script: |
+          if [ "$CONFIGURATION" != "Release" ] && [ -e "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/container-migration.plist" ]; then
+            echo "error: the $CONFIGURATION app must not carry container-migration.plist (it would move the user's real settings)"
+            exit 1
+          fi
 
   QuickEditTests:
     type: bundle.unit-test

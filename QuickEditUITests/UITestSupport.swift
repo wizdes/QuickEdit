@@ -4,8 +4,10 @@ import XCTest
 ///
 /// The UI test runner is sandboxed (it may read any path but write only in its
 /// own container), so `./build.sh test` makes the fixture files and folders and
-/// passes their path as TEST_RUNNER_QE_FIXTURES. The app is not sandboxed and
-/// saves into those folders; the tests only read them.
+/// passes their path as TEST_RUNNER_QE_FIXTURES. The app is sandboxed too
+/// (M9), so the fixtures live in the Debug app's own container
+/// (~/Library/Containers/dev.yili.QuickEdit.debug/Data/tmp), where it may
+/// read and save without a Save or Open panel; the tests only read them.
 @MainActor
 class QuickEditUITestCase: XCTestCase {
     var app: XCUIApplication!

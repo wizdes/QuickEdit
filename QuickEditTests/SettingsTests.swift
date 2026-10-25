@@ -314,8 +314,7 @@ final class SettingsTests: XCTestCase {
         let controller = makeController()
         let window = try XCTUnwrap(controller.window)
         let tabs = try XCTUnwrap(controller.tabView)
-        let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("build/shots", isDirectory: true)
+        let folder = TestShots.folder
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         for (index, name, appearance) in [(0, "settings-new-document", NSAppearance.Name.darkAqua),
                                           (1, "settings-open-and-save", .darkAqua),

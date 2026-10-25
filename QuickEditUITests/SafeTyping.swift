@@ -16,7 +16,7 @@ import XCTest
 /// outside this file.
 
 extension QuickEditUITestCase {
-    static let quickEditBundleID = "dev.yili.QuickEdit"
+    static let quickEditBundleID = "dev.yili.QuickEdit.debug"  // the Debug build (project.yml)
     static let safeTypeChunk = 20
 
     /// Types `text` into `target` (the app when nil), in short chunks, each

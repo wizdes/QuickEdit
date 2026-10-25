@@ -118,21 +118,52 @@ ui_tests_possible() {
     return 0
 }
 
+# The Debug app is sandboxed (M9) under its own bundle ID (project.yml), so
+# it may read and write only its own container and files the user picks.
+# The UI test fixtures and the unit tests' screenshots live in that
+# container's tmp folder. Never the real app's container.
+DEBUG_BUNDLE_ID="dev.yili.QuickEdit.debug"
+DEBUG_CONTAINER="$HOME/Library/Containers/$DEBUG_BUNDLE_ID/Data"
+
+# macOS makes an app's container at its first launch. A fresh Mac has none,
+# so build the Debug app and start it once, then stop it.
+ensure_debug_container() {
+    [ -d "$DEBUG_CONTAINER/tmp" ] && return 0
+    local log="$BUILD/debug-container.log" app="$TEST_DERIVED/Build/Products/Debug/QuickEdit.app"
+    echo "making the Debug app's container (first sandboxed run on this Mac; log: $log)"
+    xcodebuild -project "$PROJECT" -scheme QuickEdit -configuration Debug -derivedDataPath "$TEST_DERIVED" \
+        -destination 'platform=macOS,arch=arm64' CODE_SIGN_IDENTITY=- CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+        ${TEST_SETTINGS[@]+"${TEST_SETTINGS[@]}"} build >"$log" 2>&1 || die "Debug build for the container (log: $log)"
+    "$app/Contents/MacOS/QuickEdit" -ApplePersistenceIgnoreState YES -NSQuitAlwaysKeepsWindows NO >>"$log" 2>&1 &
+    local pid=$! i
+    for i in $(seq 1 100); do [ -d "$DEBUG_CONTAINER/tmp" ] && break; sleep 0.1; done
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+    [ -d "$DEBUG_CONTAINER/tmp" ] || die "the Debug app made no container at $DEBUG_CONTAINER"
+}
+
 # Files and folders the UI tests read and save into (see QuickEditUITests/UITestSupport.swift).
+# Each run gets a new folder, so nothing is deleted here.
 make_fixtures() {
     local dir="$1"
-    unlock_fixtures "$dir"
-    rm -rf "$dir"
+    [ ! -e "$dir" ] || die "fixture folder $dir already exists"
     mkdir -p "$dir"
     local name
-    for name in open-type-save new-save boundary ext-on ext-off ext-md open-panel shots \
+    for name in open-type-save new-save boundary ext-on ext-off ext-md ext-replace open-panel shots \
         transient external-clean external-edited locked close-named close-untitled \
-        rename-move rename-move/dest restore recent cascade revert encodings dark-mode; do
+        rename-move rename-move/dest restore recent cascade revert encodings dark-mode sandbox-restore; do
         mkdir -p "$dir/$name"
     done
     printf 'abc\n' >"$dir/open-type-save/hello.txt"
     printf 'start\n' >"$dir/boundary/boundary.txt"
     printf 'opened by the Open panel\n' >"$dir/open-panel/openme.txt"
+    # M9: saving "plain" with the .txt box on asks before replacing this
+    # (QuickEditUITests/SandboxUITests.swift).
+    printf 'keep me\n' >"$dir/ext-replace/plain.txt"
+    # M9: the first window of the outside-file restoration test. With saved
+    # state read, an app that last quit with no windows opens none, so the
+    # test opens this one at launch (QuickEditUITests/SandboxUITests.swift).
+    printf 'first window\n' >"$dir/sandbox-restore/start.txt"
     # M2 document life (QuickEditUITests/DocumentLifeTests.swift and friends).
     printf 'replaces the untitled window\n' >"$dir/transient/replace.txt"
     printf 'before\n' >"$dir/external-clean/outside.txt"
@@ -188,11 +219,29 @@ run_tests() {
         for target in $only; do args+=("-only-testing:$target"); done
     fi
     # The UI test runner is sandboxed: it can read any path but write only
-    # inside its own container. So the fixture files are made here, and the
-    # (unsandboxed) app saves into these folders.
-    local fixtures="$BUILD/uitest-fixtures/$label-$stamp"
+    # inside its own container. So the fixture files are made here, inside
+    # the sandboxed Debug app's container, where the app may read and write.
+    ensure_debug_container
+    local fixtures="$DEBUG_CONTAINER/tmp/QuickEditUITestFixtures/$label-$stamp"
     make_fixtures "$fixtures"
     export TEST_RUNNER_QE_FIXTURES="$fixtures"
+    # One file OUTSIDE the container, which the app may use only once it is
+    # picked in the Open panel (QuickEditUITests/SandboxUITests.swift).
+    local outside="$BUILD/uitest-outside/$label-$stamp"
+    mkdir -p "$outside"
+    printf 'outside\n' >"$outside/user.txt"
+    printf 'restored from outside\n' >"$outside/restore.txt"
+    printf 'life\n' >"$outside/life.txt"
+    printf 'caf\303\251\n' >"$outside/latin.txt"
+    printf 'before\n' >"$outside/reload.txt"
+    # Over the 50 MB large-file limit, so QuickEdit clones it (M8 V3).
+    awk 'BEGIN { for (i = 0; i < 1400000; i++) printf "line %07d of the large outside file\n", i }' >"$outside/big.txt"
+    export TEST_RUNNER_QE_OUTSIDE="$outside"
+    # Screenshots the unit tests draw (read by root): written in the
+    # container, copied to build/shots after the run.
+    local shots="$DEBUG_CONTAINER/tmp/QuickEditShots/$label-$stamp"
+    mkdir -p "$shots"
+    export TEST_RUNNER_QE_SHOTS="$shots"
     echo "xcodebuild test: $label (log: $log)"
     echo "fixtures: $fixtures"
     echo "results: $results"
@@ -204,6 +253,13 @@ run_tests() {
         echo "xcodebuild test hit the ${QE_TEST_TIMEOUT:-1200} s limit and was stopped" >&2
     fi
     unlock_fixtures "$fixtures"
+    # The large outside file and its copy take about 110 MB per run.
+    rm -f "$outside/big.txt" "$outside/big-copy.txt"
+    if [ -n "$(ls -A "$shots")" ]; then
+        mkdir -p "$BUILD/shots"
+        ditto "$shots" "$BUILD/shots"
+        echo "shots: copied to $BUILD/shots"
+    fi
     # Stop any test host or UI-test app copy the run left behind.
     pkill -f "$TEST_DERIVED/Build/Products/Debug/QuickEdit.app/Contents/MacOS/QuickEdit" 2>/dev/null || true
     pkill -f "$TEST_DERIVED/Build/Products/Debug/QuickEditUITests-Runner.app/Contents/MacOS/QuickEditUITests-Runner" 2>/dev/null || true
@@ -343,21 +399,22 @@ case "$cmd" in
         echo "SPEED: PASS"
         ;;
     quick)
-        # The check for each change (user, 2026-10-25: under 10 minutes). The
-        # full run (./build.sh test, about 25 min) stays for releases.
+        # The check for each change (user decisions U6, 2026-10-25: under 10
+        # minutes). The full run (./build.sh test, about 25 min) stays for releases.
         # Keeps: the raw-typing lint; every unit test class but the typing
         # speed one; the UI tests in QUICK_UI_TESTS, which guard file bytes
-        # and the open, type, save, close and find flows; and any UI test
-        # class named in QUICK_UI_CLASSES whose file exists.
+        # and the open, type, save, close and find flows, plus the sandbox's
+        # user-picked file paths; and the UI test classes in QUICK_UI_CLASSES.
         # Leaves out: launchbench-test.sh (4.5 min, checks the race harness),
-        # build-sh-test.sh, TypingSpeedTests, and the slow layout, encoding
-        # panel, PDF, restoration and screenshot UI tests.
+        # build-sh-test.sh, sandbox-release-test.sh (a Release build),
+        # TypingSpeedTests, the slow layout, encoding panel, PDF, restoration
+        # and screenshot UI tests, and the other SandboxUITests.
+        # Every listed UI test and class must run at least one test, and the
+        # UI tests must run at all (M9 review row 2).
         mkdir -p "$BUILD"
         QE_SHELL_TESTS_DIR="$BUILD/quick-shell-tests"
         rm -rf "$QE_SHELL_TESTS_DIR"; mkdir -p "$QE_SHELL_TESTS_DIR"
         ln -s "$ROOT/bench/tests/raw-typing-lint-test.sh" "$QE_SHELL_TESTS_DIR/"
-        [ -e "$ROOT/bench/tests/sandbox-release-test.sh" ] \
-            && ln -s "$ROOT/bench/tests/sandbox-release-test.sh" "$QE_SHELL_TESTS_DIR/"
         export QE_SHELL_TESTS_DIR
         run_shell_tests
         quick=""
@@ -374,18 +431,21 @@ case "$cmd" in
             ExternalChangeTests/testEditedDocumentShowsConflictOnSave
             FindAndLineTests/testTypingInFindBarFindsAMatch
             FindAndLineTests/testCopyPasteUndoRedoCutInTheKeyWindow
-            WindowsAndMenusTests/testOpenRecentListsAnOpenedFile"
-        QUICK_UI_CLASSES="ShortcutUITests AccessibilityAuditTests SandboxUITests"
-        if ui_tests_possible; then
-            for t in $QUICK_UI_TESTS; do quick+=" QuickEditUITests/$t"; done
-            for c in $QUICK_UI_CLASSES; do
-                [ -e "$ROOT/QuickEditUITests/$c.swift" ] && quick+=" QuickEditUITests/$c"
-            done
-        else
-            echo "QUICK: UI tests NOT RUN (reason above); unit tests only" >&2
-        fi
+            WindowsAndMenusTests/testOpenRecentListsAnOpenedFile
+            SandboxUITests/testOutsideFilePickedInOpenPanelSavesAndReopensFromOpenRecent
+            SandboxUITests/testOutsideFileSavesRevertsAndExportsAPDF"
+        QUICK_UI_CLASSES="ShortcutUITests AccessibilityAuditTests"
+        ui_ok=0
+        ui_tests_possible && ui_ok=1
+        [ "$ui_ok" -eq 1 ] || die "UI tests cannot run (reason above), so ./build.sh quick cannot pass"
+        for t in $QUICK_UI_TESTS $QUICK_UI_CLASSES; do quick+=" QuickEditUITests/$t"; done
         QE_TEST_TIMEOUT="${QE_TEST_TIMEOUT:-600}" run_tests "$quick" quick
-        ui_tests_possible >/dev/null 2>&1 || die "UI tests not run, so ./build.sh quick cannot pass"
+        for t in $QUICK_UI_TESTS $QUICK_UI_CLASSES; do
+            pattern="Test Case '-\\[QuickEditUITests\\.${t%%/*}"
+            [[ "$t" == */* ]] && pattern+=" ${t#*/}\\]"
+            grep -qE "$pattern.*' passed" "$TEST_LOG" || die "listed UI test $t did not run (log: $TEST_LOG)"
+        done
+        echo "QUICK: every listed UI test ran"
         ;;
     uicheck)
         # Only the check that ./build.sh test runs before any UI test.

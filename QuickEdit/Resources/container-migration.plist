@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- M9 settings move (done-test 5). On the first sandboxed launch macOS
+	     moves the settings that the unsandboxed QuickEdit saved into the new
+	     container. Release only: project.yml leaves this file out of the
+	     Debug app, whose own bundle ID must never take the user's file.
+	     bench/tests/sandbox-release-test.sh checks it with a scratch bundle ID. -->
+	<key>Move</key>
+	<array>
+		<string>${Library}/Preferences/dev.yili.QuickEdit.plist</string>
+	</array>
+</dict>
+</plist>
