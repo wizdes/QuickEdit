@@ -1,14 +1,14 @@
 # QuickEdit state
 
-Rewritten at each milestone, never appended. Last rewrite: 2026-10-24, M7 done and merged into main.
+Rewritten at each milestone, never appended. Last rewrite: 2026-10-25, M8 done and merged into main.
 
-Milestone: M7 (PDF output) done. Next: M8 (speed).
-Branch / worktree / commit: dev at 5920d65, merged into main at 8c90440. Work continues on dev (worktrees/dev) and merges into main at each milestone check.
+Milestone: M8 (speed) done. Next: M9 (system parts, custom keyboard shortcuts U2, sandbox on).
+Branch / worktree / commit: dev, merged into main at each milestone check. Work continues on dev (worktrees/dev).
 Unmerged work: none.
-Checks run at 5920d65's code (b750aae): `./build.sh test` 315 of 315 (unit and UI, shell tests 3 of 3). M7 build notarized: builds/QuickEdit-M7.zip (Accepted, stapled). Diagram: docs/diagrams/M7.html.
-Not run: TextKit 2 benchmark at n=5 (needs a quiet Mac); typing latency; M2 to M6 notarized builds and diagrams (only M1 and M7 have builds).
-Speed facts: launch to keystroke-ready 269.4 ms vs TextEdit window 292.6 ms (median of 5, 2026-10-24); Select Line near line 1,000,000 of 100 MB about 91 ms each way; 10 MB switch to Wrap to Page 4 ms; 1 MB to PDF 492 ms (Wrap to Window), 883 ms (Wrap to Page).
-User decisions: plain text, Swift, QuickEdit, vote rule, plan (2026-10-23); 3 old UTF-8 tests deleted; 3 UI test assertion changes; encoding test changes; U1 PDF only, no printing; U2 custom keyboard shortcuts in M9; UI tests guard every key press and the dark mode test opens a file (all 2026-10-24). Votes: V1 TextKit 1, V2 match AppKit encoding detection.
-Choices to check: docs/decisions.md "Choices to check"; M7: PDFs drawn by QuickEdit (Core Graphics), header and footer look, paper-size pop-up not in the Tab order.
-Traps: UI tests type into the front app (now guarded); Page Setup triggers a local-network prompt (removed); full-screen test shots show the user's desktop; the disk filled once (clear build/ and old scratch clones).
-Next action: TextKit 2 benchmark n=5 when the Mac is idle, then plan and build M8.
+Checks run at the M8 merge: `./build.sh test` 417 of 417 (unit and UI), shell tests 3 of 3; `./build.sh speed` 11 of 12 (the 1 GB open blocked 304 ms vs 200 ms under memory pressure level 2 with another session's VM at 2.6 GB; user: re-test later). M8 build notarized: builds/QuickEdit-M8.zip (Accepted, stapled). Diagram: docs/diagrams/M8.html. Reviews: docs/reviews/M8-code.md rows 1-44.
+Not met: done-test 1. Launch race 2026-10-25 (swap 1.7 GB): QuickEdit ready 312.3 ms vs TextEdit 317.3 ms; goal 25 ms faster. User: merge now, race again later. M7 race on a quieter Mac: 269.4 vs 292.6 ms.
+Speed facts (builder unit-level measurements): 100 MB open 525 to 80 ms; 10 MB Wrap to Page freeze 358 to 34.5 ms; 10 MB PDF export freeze 3,669 to under 50 ms (background job with Cancel); 1 GB opens read-only in 670 ms, 52 ms freeze, 1,144 MB peak (quiet Mac); typing p95 at the start of 100 MB in Wrap to Page 5.65 ms.
+User decisions: plain text, Swift, QuickEdit, vote rule, plan (2026-10-23); U1 PDF only; U2 custom shortcuts in M9; UI tests guard every key press (2026-10-24); ReviewFixTests closes its document; M8ReviewFixTests reload test waits for the reload to end; PDF export memory checked only in the speed run; finish M8 with the 1 GB check and the launch goal re-tested later (all 2026-10-25). Votes: V1 TextKit 1, V2 match AppKit encoding detection, V3 read-only over 512 MiB.
+Choices to check: docs/decisions.md "Choices to check"; M8: large-file note in the window title; background PDF over 100,000 characters; 12 ms idle layout slices; read-only limit 512 MiB; no Save As, Save To or Duplicate for a read-only file on a disk that cannot clone; empty window during a large reload; Duplicate allowed for a read-only file on APFS.
+Traps: another session's VM can push this 8 GB Mac into swap and spoil speed numbers; UI tests need an unlocked screen and no typing; flaky checks are listed in POST_MVP.md.
+Next action: plan M9 (docs/plans/M9.md), then build.

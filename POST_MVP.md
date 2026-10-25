@@ -23,3 +23,4 @@ One line each.
 - M8: macOS may clean `$TMPDIR` while a window stays open for days, which would remove a read-only file's clone; Save As would then fail.
 - M8: launch build settings: `-Osize` with LTO has the smallest code (304 KB `__TEXT` vs 400 KB); race it against `-O` on a quiet Mac.
 - Flaky: `bench/tests/launchbench-test.sh` "already-running target" failed once in a full run on 2026-10-25 (load 4) and passed alone twice. It waits a fixed 1 s for the fake app to register; wait for the registration instead.
+- M8 done-test 1 not met: launch race 2026-10-25 11:11 (swap 1.7 GB), QuickEdit ready 312.3 ms vs TextEdit 317.3 ms (goal: 25 ms faster). Race again with no VM and no swap; try `-Osize` with LTO.
