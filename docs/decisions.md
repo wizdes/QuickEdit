@@ -4,6 +4,7 @@ Critical questions go to Astra and Fable. The option with the most votes wins; r
 
 ## User decisions
 
+- U8 (2026-10-25): the accessibility audit keeps its two skips (contrast, which other apps' floating windows made flaky, and AppKit's element-less "Parent/Child mismatch" from the shared text editor). In their place, a unit test checks text contrast at 4.5:1 or better, light and dark, in every window the audit covers: the document window, every Settings tab and Select Line. Done-test 1 counts as met with that note.
 - U7 (2026-10-25): two existing tests updated for planned M9 changes: SettingsTests expects 3 tabs (adds Keyboard); M6ReviewFixTests expects 13 Tab stops (adds Paper size).
 - U6 (2026-10-25): `./build.sh quick` (under 10 minutes: lint, unit tests but typing speed, 9 critical UI tests and the M9 UI test classes) is the check for each change. The full `./build.sh test` (about 25 minutes) runs only for a release.
 - U5 (2026-10-25): a test already listed as flaky in POST_MVP.md that fails in a full run and passes when run again alone counts as passing (first case: `EditActionsTests.testStartAndStopSpeakingDriveTheSpeechSynthesizer` in the M9 sandbox run). Record each such retry in docs/STATE.md. Also: go on from M9 into M10 without stopping.
