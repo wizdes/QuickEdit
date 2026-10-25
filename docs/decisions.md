@@ -2,6 +2,10 @@
 
 Critical questions go to Astra and Fable. The option with the most votes wins; root breaks a tie. Small choices are root's safe default and appear under "Choices to check".
 
+## User decisions
+
+- U3 (2026-10-25): skip AppleScript and QuickEdit's own Services in M9. The Services menu that macOS adds by itself stays.
+
 ## Votes
 
 ### V1 (2026-10-23): which text engine?
