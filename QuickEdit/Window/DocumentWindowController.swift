@@ -180,13 +180,21 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
             stopIdleLayout()
             layoutManager.backgroundLayoutEnabled = true
             let (textView, container) = TextViewFactory.makeWindowModeTextView(size: scrollView.contentSize)
+            if !hadViews {
+                // The first view goes into the scroll view before it meets
+                // the text (M8, V3). The other way round, the layout
+                // manager first makes the view as tall as the whole text,
+                // and then joining the scroll view asks it for the glyphs
+                // in all that height: 210 ms on the main thread for 1 GB.
+                scrollView.documentView = textView
+            }
             layoutManager.insertTextContainer(container, at: 0)
             // Remove the pages from the end: each removal then invalidates
             // only the tail.
             while layoutManager.textContainers.count > 1 {
                 layoutManager.removeTextContainer(at: layoutManager.textContainers.count - 1)
             }
-            scrollView.documentView = textView
+            if hadViews { scrollView.documentView = textView }
             scrollView.hasVerticalScroller = true
             scrollView.hasHorizontalScroller = false
             // Behind a short text when zoomed out: the text's own background.
@@ -239,8 +247,27 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
         if updatesTitle { synchronizeWindowTitleWithDocumentName() }
     }
 
+    /// Added to the window title of a file too large to edit (M8, V3),
+    /// with its size, in the same place as the large-file note, which it
+    /// replaces (the checks are off too). A title note, not a banner: it
+    /// is the place the large-file note already uses, it takes no room
+    /// from the text, and the menus already show the state (Allow Editing
+    /// greyed out).
+    static func readOnlyTitleNote(byteCount: Int) -> String {
+        "Read only: file too large to edit ("
+            + ByteCountFormatter.string(fromByteCount: Int64(byteCount), countStyle: .file) + ")"
+    }
+
+    /// Added after the read-only note when the file's disk cannot clone
+    /// it, so Save As, Save To and Duplicate are off (M8 review row 29).
+    static let noCopyTitleNote = "; Save As unavailable on this disk"
+
     override func windowTitle(forDocumentDisplayName displayName: String) -> String {
-        guard textDocument?.isLargeFile == true else { return displayName }
+        guard let textDocument, textDocument.isLargeFile || textDocument.isTooLargeToEdit else { return displayName }
+        if textDocument.isTooLargeToEdit {
+            return displayName + " \u{2014} " + Self.readOnlyTitleNote(byteCount: textDocument.readByteCount)
+                + (textDocument.cannotSaveACopy ? Self.noCopyTitleNote : "")
+        }
         return displayName + " \u{2014} " + Self.largeFileTitleNote
     }
 
@@ -325,7 +352,16 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
     /// same gap. This removes them on the next turn of the run loop.
     /// In Wrap to Page an edit also starts the idle layout again (M8 n3),
     /// and every edit ends the "storage edit" signpost interval (M8 n7).
-    @objc private func documentTextDidProcessEditing(_ notification: Notification) {
+    /// The storage is filled on a background thread at open and during a
+    /// large-file reload (M8 review row 19); those edits are not the
+    /// window's to follow (the reload attaches the window again after).
+    @objc nonisolated private func documentTextDidProcessEditing(_ notification: Notification) {
+        guard Thread.isMainThread else { return }
+        nonisolated(unsafe) let note = notification
+        MainActor.assumeIsolated { followTextEdit(note) }
+    }
+
+    private func followTextEdit(_ notification: Notification) {
         if let storageEditSignpost {
             Signposts.endStorageEdit(storageEditSignpost)
             self.storageEditSignpost = nil
@@ -345,8 +381,9 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
     /// `documentTextDidProcessEditing`.
     private var storageEditSignpost: OSSignpostIntervalState?
 
-    @objc private func documentTextWillProcessEditing(_ notification: Notification) {
-        storageEditSignpost = Signposts.beginStorageEdit()
+    @objc nonisolated private func documentTextWillProcessEditing(_ notification: Notification) {
+        guard Thread.isMainThread else { return }
+        MainActor.assumeIsolated { storageEditSignpost = Signposts.beginStorageEdit() }
     }
 
     // MARK: Idle layout in Wrap to Page (M8 n3)
@@ -753,9 +790,37 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
         textView.breakUndoCoalescing()
     }
 
+    /// Prevent Editing, or a file too large to edit (M8, V3), makes every
+    /// view read-only; during a large-file reload the views take no input
+    /// at all (M8 review row 19), and from the start of any reload they
+    /// take no edits (row 40).
     func updateEditable() {
-        let editable = !(textDocument?.preventsEditing ?? false)
-        for view in textViews { view.isEditable = editable }
+        let editable = !(textDocument?.preventsEditing ?? false) && !(textDocument?.isTooLargeToEdit ?? false)
+            && !isReloading && !(textDocument?.isReloading ?? false)
+        for view in textViews {
+            view.isEditable = editable
+            view.isSelectable = !isReloading
+        }
+    }
+
+    /// A large-file reload has detached this window's layout manager.
+    private(set) var isReloading = false
+
+    func beginReload() {
+        isReloading = true
+        stopIdleLayout()
+        updateEditable()
+    }
+
+    /// The text is back: in Wrap to Page the idle layout starts again
+    /// from the start, as the new text has no glyphs yet (M8 review row 34).
+    func endReload() {
+        isReloading = false
+        updateEditable()
+        if hasMultiplePages {
+            resetIdleLayout()
+            scheduleIdleLayout()
+        }
     }
 
     /// The user took an interest in the window: it is no longer transient

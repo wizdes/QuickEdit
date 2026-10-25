@@ -117,7 +117,8 @@ final class M8ReviewFixTests: XCTestCase {
         switch change {
         case .reload:
             document.reloadAfterOutsideChange()
-            runLoop(upTo: 5) { document.textStorage.string == text }
+            // A large file reloads in the background (M8 review row 19).
+            runLoop(upTo: 5) { !document.isReloading }
         case .revert:
             try document.revert(toContentsOf: url, ofType: TextDocument.plainTextType)
         }

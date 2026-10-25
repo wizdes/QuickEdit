@@ -70,6 +70,7 @@ printf '#!/bin/bash\nexit 0\n' >"$WORK/speed-bin/xcodegen"
 cat >"$WORK/speed-bin/xcodebuild" <<FAKE
 #!/bin/bash
 printf '%s\n' "\$@" >"$WORK/speed-args"
+printf '%s' "\${TEST_RUNNER_QE_BIG_FILE_TESTS:-}" >"$WORK/speed-big-files"
 prev=""
 for a in "\$@"; do
     if [ "\$prev" = "-derivedDataPath" ]; then mkdir -p "\$a"; echo "\$a" >"$WORK/speed-derived"; fi
@@ -92,9 +93,14 @@ for want in "-configuration" "Debug" "SWIFT_OPTIMIZATION_LEVEL=-O" "SWIFT_COMPIL
     "-only-testing:QuickEditTests/PrintTests/testTenMegabyteExportInWrapToPageKeepsTheWindowResponsive" \
     "-only-testing:QuickEditTests/PrintTests/testTenMegabyteExportInWrapToPageStaysUnderTwiceTheText" \
     "-only-testing:QuickEditTests/PlainTextIOTests/testLineEndingCountOf100MBIsFast" \
-    "-only-testing:QuickEditTests/TypingSpeedTests/testWrapToPageTypingAtTheStartOf100MB"; do
+    "-only-testing:QuickEditTests/TypingSpeedTests/testWrapToPageTypingAtTheStartOf100MB" \
+    "-only-testing:QuickEditTests/LargeFileSpeedTests/testOneGigabyteOpensReadOnlyWithinTheLimits" \
+    "-only-testing:QuickEditTests/LargeFileSpeedTests/testHalfGigabyteOpensEditableWithinTheLimits" \
+    "-only-testing:QuickEditTests/LargeFileSpeedTests/testOneGigabyteReloadStaysWithinTheLimits"; do
     grep -qxF -- "$want" <<<"$args" || missing+=" $want"
 done
+# The big-file tests run only with their switch on (M8, vote V3).
+[ "$(cat "$WORK/speed-big-files" 2>/dev/null)" = "1" ] || missing+=" TEST_RUNNER_QE_BIG_FILE_TESTS=1"
 if [ "$status" -ne 0 ] && [ -z "$missing" ] && [ -n "$derived" ] && [ "$derived" != "$ROOT/build/DerivedData" ] \
     && [ ! -e "$derived" ]; then
     pass "./build.sh speed runs the speed tests optimized in its own derived data and removes it"

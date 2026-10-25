@@ -972,8 +972,10 @@ final class PrintTests: XCTestCase {
         XCTAssertNil(document.pdfJob)
         if !_isDebugAssertConfiguration() {
             XCTAssertLessThan(run.longestGap, 100, "the main thread blocked \(run.longestGap) ms during the export")
+            // Checked only in the optimized speed run: a Debug run that starts
+            // here also counts one-time font and PDF setup (user OK, 2026-10-25).
+            assertUnderTwiceTheText(run.peakMB, document)
         }
-        assertUnderTwiceTheText(run.peakMB, document)
     }
 
     /// The same in Wrap to Page, where the window also lays out its pages

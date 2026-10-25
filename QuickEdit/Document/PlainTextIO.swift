@@ -35,6 +35,45 @@ struct DecodedText: Equatable, Sendable {
     }
 }
 
+/// What `PlainTextIO.decodeInPlace` found, before any whole-text String is
+/// made (M8, vote V3). UTF-8 stays as the file's own bytes (checked in
+/// place), so a document can fill its storage from them in pieces with no
+/// second copy of the text; other encodings are decoded to a String.
+struct DecodedContent: Sendable {
+    enum Body: Sendable {
+        case text(String)
+        /// Checked strict UTF-8, BOM taken off; often the mapped file itself.
+        case utf8(Data)
+    }
+
+    var body: Body
+    var format: DecodedText.Format
+    var lossy = false
+
+    init(body: Body, format: DecodedText.Format, lossy: Bool = false) {
+        self.body = body
+        self.format = format
+        self.lossy = lossy
+    }
+
+    init(_ decoded: DecodedText) {
+        self.init(body: .text(decoded.text), format: decoded.format, lossy: decoded.lossy)
+    }
+
+    /// The text as one String (a full copy for UTF-8 bytes): for small
+    /// files, tests and callers that compare text.
+    var decodedText: DecodedText {
+        switch body {
+        case .text(let text):
+            DecodedText(text: text, format: format, lossy: lossy)
+        case .utf8(let bytes):
+            // Already checked: decoding repairs nothing, so this is the
+            // same String that String(validating:) gives.
+            DecodedText(text: String(decoding: bytes, as: UTF8.self), format: format, lossy: lossy)
+        }
+    }
+}
+
 enum LineEnding: String, Equatable, Sendable {
     case lf, crlf, cr
 
@@ -107,24 +146,54 @@ enum PlainTextIO {
     ///   replacement characters) and marked `lossy`.
     static func decode(_ data: Data, url: URL? = nil, preferred: String.Encoding? = nil,
                        fallback: String.Encoding = String.defaultCStringEncoding) throws -> DecodedText {
+        try decodeInPlace(data, url: url, preferred: preferred, fallback: fallback).decodedText
+    }
+
+    /// `decode`'s rules and errors, but UTF-8 is not copied into a String:
+    /// the result keeps the checked bytes (M8, vote V3). The old UTF-8
+    /// check made a String as it checked, a second full copy of the text
+    /// (+1,025 MB for a 1 GB file) next to the storage's own.
+    static func decodeInPlace(_ data: Data, url: URL? = nil, preferred: String.Encoding? = nil,
+                              fallback: String.Encoding = String.defaultCStringEncoding) throws -> DecodedContent {
         if let preferred {
-            guard let decoded = decode(data, as: preferred) else { throw Error.inapplicableEncoding(preferred) }
+            guard let decoded = decodeInPlace(data, as: preferred) else { throw Error.inapplicableEncoding(preferred) }
             return decoded
         }
         if let url, let named = encodingNamedByAttribute(of: url) {
-            guard let decoded = decode(data, as: named) else { throw Error.inapplicableEncoding(named) }
+            guard let decoded = decodeInPlace(data, as: named) else { throw Error.inapplicableEncoding(named) }
             return decoded
         }
         if let decoded = try decodeByBOM(data) { return decoded }
-        if let text = String(validating: data, as: UTF8.self) {
-            return DecodedText(text: text, format: .init(encoding: .utf8, hasBOM: false,
-                                                         lineEnding: mostCommonLineEnding(in: data)))
+        if isValidUTF8(data) {
+            return DecodedContent(body: .utf8(data), format: .init(encoding: .utf8, hasBOM: false,
+                                                                    lineEnding: mostCommonLineEnding(in: data)))
         }
-        if let decoded = decode(data, as: fallback) { return decoded }
+        if let decoded = decode(data, as: fallback) { return DecodedContent(decoded) }
         let text = String(decoding: data, as: UTF8.self)
-        return DecodedText(text: text, format: .init(encoding: .utf8, hasBOM: false,
-                                                     lineEnding: mostCommonLineEnding(in: data)),
-                           lossy: true)
+        return DecodedContent(body: .text(text), format: .init(encoding: .utf8, hasBOM: false,
+                                                               lineEnding: mostCommonLineEnding(in: data)),
+                              lossy: true)
+    }
+
+    /// True when `data` is strict UTF-8, the same rule as
+    /// String(validating:as: UTF8.self) (Unicode table 3-7: no overlong
+    /// forms, no surrogates, nothing over U+10FFFF), checked on the bytes
+    /// where they are, with no copy. A 1 GB file takes about 60 ms once
+    /// its pages are in memory.
+    static func isValidUTF8(_ data: Data) -> Bool {
+        (try? UTF8Span(validating: data.span)) != nil
+    }
+
+    /// `decode(_:as:)`, with UTF-8 kept as bytes.
+    static func decodeInPlace(_ data: Data, as encoding: String.Encoding) -> DecodedContent? {
+        guard encoding == .utf8 else { return decode(data, as: encoding).map(DecodedContent.init) }
+        let hasBOM = data.starts(with: utf8BOM)
+        let body = hasBOM ? data.dropFirst(utf8BOM.count) : data[...]
+        // A strict check of every byte: unlike String(data:encoding:), it
+        // never strips a BOM or repairs bad bytes.
+        guard isValidUTF8(body) else { return nil }
+        return DecodedContent(body: .utf8(body), format: .init(encoding: .utf8, hasBOM: hasBOM,
+                                                                lineEnding: mostCommonLineEnding(in: body)))
     }
 
     /// Decodes with one known encoding, or nil when the bytes do not fit.
@@ -134,13 +203,7 @@ enum PlainTextIO {
     static func decode(_ data: Data, as encoding: String.Encoding) -> DecodedText? {
         switch encoding {
         case .utf8:
-            let hasBOM = data.starts(with: utf8BOM)
-            let body = hasBOM ? data.dropFirst(utf8BOM.count) : data[...]
-            // String(validating:) checks every byte and, unlike
-            // String(data:encoding:), never strips a BOM or repairs bad bytes.
-            guard let text = String(validating: body, as: UTF8.self) else { return nil }
-            return DecodedText(text: text, format: .init(encoding: .utf8, hasBOM: hasBOM,
-                                                         lineEnding: mostCommonLineEnding(in: body)))
+            return decodeInPlace(data, as: .utf8)?.decodedText
         case .utf16:
             if data.starts(with: utf16LEBOM) { return decodeUnicode(data, bom: utf16LEBOM, body: .utf16LittleEndian, as: .utf16) }
             if data.starts(with: utf16BEBOM) { return decodeUnicode(data, bom: utf16BEBOM, body: .utf16BigEndian, as: .utf16BigEndian) }
@@ -222,13 +285,15 @@ enum PlainTextIO {
     /// and AppKit takes `FF FE 00 00` as UTF-32 even when it was meant as
     /// UTF-16 starting with U+0000. A UTF-32 body AppKit cannot read is
     /// refused, as AppKit refuses it.
-    private static func decodeByBOM(_ data: Data) throws -> DecodedText? {
+    private static func decodeByBOM(_ data: Data) throws -> DecodedContent? {
         if data.starts(with: utf32LEBOM) || data.starts(with: utf32BEBOM) {
             guard let decoded = decode(data, as: .utf32) else { throw Error.inapplicableEncoding(.utf32) }
-            return decoded
+            return DecodedContent(decoded)
         }
-        if data.starts(with: utf16LEBOM) || data.starts(with: utf16BEBOM) { return decode(data, as: .utf16) }
-        if data.starts(with: utf8BOM) { return decode(data, as: .utf8) }
+        if data.starts(with: utf16LEBOM) || data.starts(with: utf16BEBOM) {
+            return decode(data, as: .utf16).map(DecodedContent.init)
+        }
+        if data.starts(with: utf8BOM) { return decodeInPlace(data, as: .utf8) }
         return nil
     }
 
