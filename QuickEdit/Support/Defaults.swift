@@ -33,6 +33,12 @@ enum Defaults {
     /// the code under test runs; read from any thread.
     nonisolated(unsafe) static var store: UserDefaults = .standard
 
+    /// Settings > New Document > Paper size (M7): a `PaperSize` raw value.
+    /// Not a TextEdit key (TextEdit took the size from Page Setup), so it
+    /// is kept out of `DefaultsKey`. It is registered, so Restore All
+    /// Defaults puts the region's size back.
+    static let paperSizeKey = "PaperSize"
+
     /// TextEdit's `NoStringEncoding` (EncodingManager.h:54): "Automatic" or "none".
     static let noStringEncoding: Int = 0xFFFF_FFFF
 
@@ -63,6 +69,7 @@ enum Defaults {
             DefaultsKey.autosavingDelay.rawValue: 30,
             DefaultsKey.numberPagesWhenPrinting.rawValue: false,
             DefaultsKey.wrapToFitWhenPrinting.rawValue: true,
+            paperSizeKey: PaperSize.regionDefault(for: .current).rawValue,
             // Not a TextEdit key: QuickEdit always opens one untitled window at
             // launch instead of the app-centric Open panel (root's M1 item 7).
             "NSShowAppCentricOpenPanelInsteadOfUntitledFile": false,

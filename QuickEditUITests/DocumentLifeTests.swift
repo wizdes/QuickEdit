@@ -12,8 +12,8 @@ final class DocumentLifeTests: QuickEditUITestCase {
         XCTAssertEqual(bytes(url), original)
         launch(opening: url.path)
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
-        app.typeKey(.downArrow, modifierFlags: .command)
-        app.typeText("x")
+        safePress(.downArrow, .command)
+        safeType("x")
         let alert = app.sheets.firstMatch.exists ? app.sheets.firstMatch : app.dialogs.firstMatch
         XCTAssertTrue(app.sheets.firstMatch.waitForExistence(timeout: 5) || app.dialogs.firstMatch.waitForExistence(timeout: 2),
                       "no locked-file alert")
@@ -42,9 +42,9 @@ final class DocumentLifeTests: QuickEditUITestCase {
         let url = try fixtureFolder("close-named").appendingPathComponent("named.txt")
         launch(opening: url.path)
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
-        app.typeKey(.downArrow, modifierFlags: .command)
-        app.typeText("edit")
-        app.typeKey("w", modifierFlags: .command)
+        safePress(.downArrow, .command)
+        safeType("edit")
+        safePress("w", .command)
         XCTAssertFalse(app.sheets.firstMatch.waitForExistence(timeout: 2), "closing asked a question")
         waitUntil(10, "the window did not close") { self.app.windows.count == 0 }
         waitForBytes(url, Array("named\nedit".utf8))
@@ -55,8 +55,8 @@ final class DocumentLifeTests: QuickEditUITestCase {
     func testClosingAnEditedUntitledDocumentAsksAndDeleteCloses() throws {
         launch()
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
-        app.typeText("draft")
-        app.typeKey("w", modifierFlags: .command)
+        safeType("draft")
+        safePress("w", .command)
         let sheet = app.sheets.firstMatch
         XCTAssertTrue(sheet.waitForExistence(timeout: 5), "no save sheet for an edited untitled document")
         attachScreenshot("close-untitled-sheet", app.windows.firstMatch.screenshot())
@@ -73,8 +73,8 @@ final class DocumentLifeTests: QuickEditUITestCase {
         let saved = Array("saved text\n".utf8)
         launch(opening: url.path)
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
-        app.typeKey(.downArrow, modifierFlags: .command)
-        app.typeText("junk")
+        safePress(.downArrow, .command)
+        safeType("junk")
         XCTAssertEqual(text, "saved text\njunk")
 
         // With autosave in place, AppKit makes "Revert To" a submenu; its
@@ -111,21 +111,21 @@ final class DocumentLifeTests: QuickEditUITestCase {
 
         // Duplicate: an untitled copy with the same text, saved next to it,
         // then closed so the original's window is in front again.
-        app.typeKey("s", modifierFlags: [.command, .shift])
+        safePress("s", [.command, .shift])
         waitUntil(10, "no duplicate window") { self.app.windows.count == 2 }
-        app.typeKey("s", modifierFlags: .command)
+        safePress("s", .command)
         fillSavePanel(name: "copy", folder: folder)
         waitForBytes(folder.appendingPathComponent("copy.txt"), content)
-        app.typeKey("w", modifierFlags: .command)
+        safePress("w", .command)
         waitUntil(10, "the duplicate window did not close") { self.app.windows.count == 1 }
         XCTAssertEqual(bytes(original), content, "Duplicate leaves the original unchanged")
 
         // Rename…: the title becomes an editable field.
         chooseMenu("File", "Rename\u{2026}")
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
-        app.typeKey("a", modifierFlags: .command)
-        app.typeText("renamed.txt")
-        app.typeKey(.return, modifierFlags: [])
+        safePress("a", .command)
+        safeType("renamed.txt")
+        safePress(.return, [])
         waitUntil(10, "rename did not happen") { self.bytes(renamed) == content && self.bytes(original) == nil }
 
         // Move To…: the location menu, Other…, then Go to Folder. On macOS 27
@@ -136,12 +136,12 @@ final class DocumentLifeTests: QuickEditUITestCase {
         XCTAssertTrue(moveSheet.waitForExistence(timeout: 5), "no Move To sheet")
         moveSheet.popUpButtons.firstMatch.click()
         app.menuItems["Other\u{2026}"].firstMatch.click()
-        app.typeKey("g", modifierFlags: [.command, .shift])
+        safePress("g", [.command, .shift])
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
-        app.typeText(dest.path)
-        app.typeKey(.return, modifierFlags: [])
+        safeType(dest.path)
+        safePress(.return, [])
         RunLoop.current.run(until: Date().addingTimeInterval(1.0))
-        app.typeKey(.return, modifierFlags: [])
+        safePress(.return, [])
         if moveSheet.exists { moveSheet.buttons["Move"].firstMatch.click() }
         waitUntil(10, "move did not happen") { self.bytes(moved) == content && self.bytes(renamed) == nil }
         XCTAssertEqual(bytes(folder.appendingPathComponent("copy.txt")), content, "the copy is unchanged")

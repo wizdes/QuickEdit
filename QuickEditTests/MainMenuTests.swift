@@ -185,6 +185,13 @@ final class MainMenuTests: XCTestCase {
             "Move To\u{2026}||moveDocument:",
             "Save All||saveAllDocuments:",
             "Revert to Saved||revertDocumentToSaved:",
+            // M7 (user decision U1): both write a PDF; Print… has its own
+            // action, never printDocument:. Edit.nib order, without Show
+            // Properties and Page Setup… and their separators.
+            "----",
+            "Export as PDF\u{2026}||saveDocumentToPDF:",
+            "----",
+            "Print\u{2026}|Cmd+p|printToPDF:",
         ])
     }
 

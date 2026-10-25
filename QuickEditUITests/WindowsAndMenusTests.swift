@@ -6,7 +6,7 @@ final class WindowsAndMenusTests: QuickEditUITestCase {
         launch()
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
         let first = app.windows.firstMatch.frame
-        app.typeKey("n", modifierFlags: .command)
+        safePress("n", .command)
         waitUntil(10, "Cmd+N did not add a window") { self.app.windows.count == 2 }
         let second = app.windows.firstMatch.frame // the front window is the new one
         XCTAssertGreaterThan(second.minX, first.minX, "moves right: \(first) -> \(second)")
@@ -19,7 +19,7 @@ final class WindowsAndMenusTests: QuickEditUITestCase {
         let url = try fixtureFolder("recent").appendingPathComponent("recent.txt")
         launch(opening: url.path)
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
-        app.typeKey("w", modifierFlags: .command)
+        safePress("w", .command)
         chooseMenu("File", "Open Recent")
         let item = app.menuBars.menuBarItems["File"].menuItems["Open Recent"].menuItems["recent.txt"]
         XCTAssertTrue(item.waitForExistence(timeout: 5), "recent.txt is not in Open Recent")

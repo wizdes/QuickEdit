@@ -25,7 +25,7 @@ Each row is one behavior QuickEdit must match or deliberately change. Status is 
 | P15 | File changed by another app: reloads when clean, warns when dirty. | NSDocument | same; QuickEdit reloads after about 3 s (macOS notice delay); M3 makes it compare content, not dates |
 | P16 | Windows, selection and scroll position restored after relaunch. | DocumentWindowController.m:619-637 | better: also restores the selection and first visible line (TextEdit 1.9 restores only the scroller style); fix for exact scroll place in M3 |
 | P17 | Opening a file from an empty untitled window replaces that window (transient document). | DocumentController.m:153-266 | same (unit tested; UI test not run yet) |
-| P18 | Export as PDF… | Edit.nib:315 | todo (built in M7) |
+| P18 | Export as PDF… | Edit.nib:315 | changed (U1): a Save panel for a .pdf with the two print options as its accessory, then the same PDF as Print…, drawn by QuickEdit itself, not a print operation (unit tested: PrintTests; UI test not run) |
 
 ## M3: encodings and line endings
 | ID | Behavior | Ref | Status |
@@ -72,9 +72,9 @@ Each row is one behavior QuickEdit must match or deliberately change. Status is 
 ## M7: printing and PDF
 | ID | Behavior | Ref | Status |
 | --- | --- | --- | --- |
-| P60 | Print (Cmd+P) with "Print header and footer" (off) and "Rewrap contents to fit page" (on, wrap-to-window only). | codemap 5.5 | todo |
-| P61 | Page Setup (Shift+Cmd+P). | menu File | todo |
-| P62 | Export as PDF matches Print output. | codemap 6 | todo |
+| P60 | Print (Cmd+P) with "Print header and footer" (off) and "Rewrap contents to fit page" (on, wrap-to-window only). | codemap 5.5 | changed (U1): Cmd+P saves a PDF; no Print panel, no printer. Both options sit in the PDF Save panel with TextEdit's defaults; 72 pt margins on every side (Document.m:679-689); paper from Settings > New Document > Paper size (Letter in the US and Canada, A4 elsewhere; also Legal). Unit tested: PrintTests, PrintAccessoryTests, PaperSizeTests; UI test not run; the PDF is drawn by QuickEdit (PDFRenderer), so nothing reaches the print system; a print request from Finder or a script opens the same PDF Save panel |
+| P61 | Page Setup (Shift+Cmd+P). | menu File | left out (U1): it made the print helper search the local network; the paper size moved to Settings |
+| P62 | Export as PDF matches Print output. | codemap 6 | same: one code path (PrintTests.testPrintAndExportGiveTheSamePages) |
 
 ## M9: system parts
 | ID | Behavior | Ref | Status |

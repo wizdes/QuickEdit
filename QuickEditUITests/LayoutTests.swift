@@ -20,13 +20,13 @@ final class LayoutTests: QuickEditUITestCase {
         let fullScreenItems = view.menuItems.matching(identifier: "toggleFullScreen:")
         XCTAssertEqual(fullScreenItems.count, 1,
                        "View menu: \(view.menuItems.allElementsBoundByIndex.map(\.title))")
-        app.typeKey(.escape, modifierFlags: [])
-        app.typeKey("f", modifierFlags: [.command, .control])
+        safePress(.escape, [])
+        safePress("f", [.command, .control])
         waitUntil(10, "the window did not fill the screen") {
             self.window.frame.width >= screen.width - 1 && self.window.frame.height >= screen.height - 40
         }
         attachScreenshot("full-screen", XCUIScreen.main.screenshot())
-        app.typeKey("f", modifierFlags: [.command, .control])
+        safePress("f", [.command, .control])
         waitUntil(10, "the window did not leave full screen") { self.window.frame == before }
     }
 
@@ -34,7 +34,7 @@ final class LayoutTests: QuickEditUITestCase {
     func testMergeAllWindowsMakesTabs() throws {
         launch()
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
-        app.typeKey("n", modifierFlags: .command)
+        safePress("n", .command)
         waitUntil(10, "Cmd+N did not add a window") { self.app.windows.count == 2 }
         chooseMenu("Window", "Merge All Windows")
         waitUntil(10, "the windows did not merge") { self.app.windows.count == 1 }
@@ -51,42 +51,47 @@ final class LayoutTests: QuickEditUITestCase {
         launch(extraArguments: ["-NSAutomaticCapitalizationEnabled", "NO"])
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
         textView.click()
-        app.typeKey("w", modifierFlags: [.command, .shift])
+        safePress("w", [.command, .shift])
         waitUntil(5, "Wrap to Page made no page") { self.app.textViews.count >= 1 }
         let format = app.menuBars.menuBarItems["Format"]
         format.click()
         XCTAssertTrue(format.menuItems["Wrap to Window"].waitForExistence(timeout: 5), "the title did not flip")
-        app.typeKey(.escape, modifierFlags: [])
+        safePress(.escape, [])
 
         // About two pages of lines.
-        app.typeText(String(repeating: "a line of text\n", count: 70))
+        safeType(String(repeating: "a line of text\n", count: 70))
         waitUntil(10, "typing past page 1 did not add a page") { self.app.textViews.count >= 2 }
         attachScreenshot("wrap-to-page", XCUIScreen.main.screenshot())
 
-        app.typeKey(".", modifierFlags: [.command, .shift])
-        app.typeKey(",", modifierFlags: [.command, .shift])
-        app.typeKey(",", modifierFlags: [.command, .shift])
+        safePress(".", [.command, .shift])
+        safePress(",", [.command, .shift])
+        safePress(",", [.command, .shift])
         attachScreenshot("wrap-to-page-50", XCUIScreen.main.screenshot())
-        app.typeKey("0", modifierFlags: .command)
+        safePress("0", .command)
 
-        app.typeKey("w", modifierFlags: [.command, .shift])
+        safePress("w", [.command, .shift])
         waitUntil(5, "Wrap to Window did not go back to one text view") { self.app.textViews.count == 1 }
         XCTAssertTrue(text.hasSuffix("a line of text\n"), "the text changed in the switch")
     }
 
     /// Dark mode: in Wrap to Window the text area is dark with light text;
     /// in Wrap to Page the page stays white with dark text, as in TextEdit.
+    /// The text comes from a fixture file made by build.sh (20 lines of
+    /// "readable text in dark mode"), not from typing, so a long typed
+    /// string cannot land in another app.
     func testDarkModeKeepsTextReadable() throws {
-        launch(extraArguments: ["-AppleInterfaceStyle", "Dark"])
+        let url = try fixtureFolder("dark-mode").appendingPathComponent("dark.txt")
+        launch(opening: url.path, extraArguments: ["-AppleInterfaceStyle", "Dark"])
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
+        XCTAssertEqual(text, String(repeating: "readable text in dark mode\n", count: 20),
+                       "the dark mode fixture did not open")
         textView.click()
-        app.typeText(String(repeating: "readable text in dark mode\n", count: 20))
         let windowShot = textView.screenshot()
         attachScreenshot("dark-window", windowShot)
         let windowBrightness = try averageBrightness(windowShot)
         XCTAssertLessThan(windowBrightness, 0.4, "Wrap to Window should be dark in dark mode")
 
-        app.typeKey("w", modifierFlags: [.command, .shift])
+        safePress("w", [.command, .shift])
         let page = app.textViews.firstMatch
         XCTAssertTrue(page.waitForExistence(timeout: 5))
         // The page's text view is taller than the window, so its own

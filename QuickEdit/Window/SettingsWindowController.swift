@@ -48,6 +48,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
     private(set) var openEncodingPopUp: EncodingPopUpButton?
     private(set) var saveEncodingPopUp: EncodingPopUpButton?
     private(set) var restoreButton: NSButton?
+    /// Paper size for new documents (M7; not in TextEdit, which used Page Setup).
+    private(set) var paperSizePopUp: NSPopUpButton?
     /// Every checkbox, by the default it writes.
     private(set) var checkboxes: [DefaultsKey: NSButton] = [:]
 
@@ -165,6 +167,19 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
                             frame: NSRect(x: 20, y: 38, width: 195, height: Layout.checkboxHeight))
         wrap.toolTip = "Select to make text wrap to document margins rather than window boundaries."
         view.addSubview(wrap)
+        // Paper size (M7, user decision U1: no Page Setup), on the Wrap to
+        // page row: it sets the page size for Wrap to Page and PDFs.
+        view.addSubview(label("Paper size:", frame: NSRect(x: 222, y: 41, width: 62, height: 14)))
+        let paper = NSPopUpButton(frame: NSRect(x: 286, y: 36, width: 96, height: 22), pullsDown: false)
+        paper.controlSize = .small
+        paper.font = Self.smallFont
+        paper.addItems(withTitles: PaperSize.allCases.map(\.title))
+        paper.identifier = NSUserInterfaceItemIdentifier(Defaults.paperSizeKey)
+        paper.toolTip = "Choose the paper size for Wrap to Page and for PDFs of new documents."
+        paper.target = self
+        paper.action = #selector(paperSizeChanged(_:))
+        view.addSubview(paper)
+        paperSizePopUp = paper
 
         // Window Size (:948, :365-587).
         view.addSubview(header("Window Size", top: 85))
@@ -348,6 +363,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
             field.integerValue = Defaults.integer(key)
         }
         fontNameField?.stringValue = Self.fontDescription(plainTextFont)
+        paperSizePopUp?.selectItem(withTitle: PaperSize.current.title)
         select(Self.encoding(for: .plainTextEncoding), in: openEncodingPopUp)
         select(Self.encoding(for: .plainTextEncodingForWrite), in: saveEncodingPopUp)
     }
@@ -386,6 +402,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         guard let raw = sender.identifier?.rawValue, let key = DefaultsKey(rawValue: raw),
               let number = sender.selectedItem?.representedObject as? NSNumber else { return }
         Defaults.store.set(number.intValue, forKey: key.rawValue)
+    }
+
+    @objc func paperSizeChanged(_ sender: NSPopUpButton) {
+        guard let title = sender.titleOfSelectedItem,
+              let paper = PaperSize.allCases.first(where: { $0.title == title }) else { return }
+        Defaults.store.set(paper.rawValue, forKey: Defaults.paperSizeKey)
     }
 
     /// Preferences.m:182-199, without the rich-text and HTML parts.

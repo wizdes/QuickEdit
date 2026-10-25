@@ -9,9 +9,9 @@ final class OpenTypeSaveTests: QuickEditUITestCase {
         launch(opening: url.path)
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
         XCTAssertEqual(text, "abc\n")
-        app.typeKey(.downArrow, modifierFlags: .command) // end of document
-        app.typeText("XYZ")
-        app.typeKey("s", modifierFlags: .command)
+        safePress(.downArrow, .command) // end of document
+        safeType("XYZ")
+        safePress("s", .command)
         waitForBytes(url, Array("abc\nXYZ".utf8))
     }
 
@@ -21,7 +21,7 @@ final class OpenTypeSaveTests: QuickEditUITestCase {
         launch()
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
         let windowsBefore = app.windows.count
-        app.typeKey("n", modifierFlags: .command)
+        safePress("n", .command)
         // M1 review row 5: New must make a new window, not reuse the old one.
         let more = NSPredicate { _, _ in self.app.windows.count == windowsBefore + 1 }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: more, object: nil)], timeout: 10),
@@ -29,11 +29,11 @@ final class OpenTypeSaveTests: QuickEditUITestCase {
         let newWindow = app.windows.firstMatch // the front window is the new one
         let firstTitle = app.windows.element(boundBy: 1).title
         XCTAssertNotEqual(newWindow.title, firstTitle, "the front window is not a new document")
-        app.typeText("hi")
+        safeType("hi")
         XCTAssertEqual(newWindow.textViews.firstMatch.value as? String, "hi", "typing did not go to the new window")
         XCTAssertEqual(app.windows.element(boundBy: 1).textViews.firstMatch.value as? String, "",
                        "typing changed the first window")
-        app.typeKey("s", modifierFlags: .command)
+        safePress("s", .command)
         fillSavePanel(name: "greeting", folder: folder)
         waitForBytes(folder.appendingPathComponent("greeting.txt"), Array("hi".utf8))
     }
@@ -44,24 +44,24 @@ final class OpenTypeSaveTests: QuickEditUITestCase {
         waitForBytes(url, Array("start\n".utf8))
         launch(opening: url.path)
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
-        app.typeKey(.downArrow, modifierFlags: .command)
-        app.typeText("saved")
-        app.typeKey("s", modifierFlags: .command)
+        safePress(.downArrow, .command)
+        safeType("saved")
+        safePress("s", .command)
         waitForBytes(url, Array("start\nsaved".utf8))
         XCTAssertFalse(isEdited(), "document still marked edited right after Cmd+S")
 
-        app.typeText(" more")
+        safeType(" more")
         XCTAssertEqual(text, "start\nsaved more")
         XCTAssertTrue(isEdited(), "typing after a save must mark the document edited")
 
         // One Undo goes back to the text as saved, not further.
-        app.typeKey("z", modifierFlags: .command)
+        safePress("z", .command)
         XCTAssertEqual(text, "start\nsaved", "one Undo after the save restores the post-save text")
-        app.typeKey("z", modifierFlags: [.command, .shift])
+        safePress("z", [.command, .shift])
         XCTAssertEqual(text, "start\nsaved more")
 
-        app.typeText(" end")
-        app.typeKey("q", modifierFlags: .command)
+        safeType(" end")
+        safePress("q", .command)
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 15), "QuickEdit did not quit")
         waitForBytes(url, Array("start\nsaved more end".utf8))
 
@@ -98,16 +98,16 @@ final class OpenTypeSaveTests: QuickEditUITestCase {
     func testOpenPanelOpensFile() throws {
         let url = try fixtureFolder("open-panel").appendingPathComponent("openme.txt")
         launch()
-        app.typeKey("o", modifierFlags: .command)
+        safePress("o", .command)
         let panel = app.sheets.firstMatch.exists ? app.sheets.firstMatch : app.dialogs.firstMatch
         XCTAssertTrue(panel.waitForExistence(timeout: 10) || app.windows["Open"].waitForExistence(timeout: 5),
                       "no Open panel")
-        app.typeKey("g", modifierFlags: [.command, .shift])
+        safePress("g", [.command, .shift])
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
-        app.typeText(url.path)
-        app.typeKey(.return, modifierFlags: [])
+        safeType(url.path)
+        safePress(.return, [])
         RunLoop.current.run(until: Date().addingTimeInterval(1.0))
-        app.typeKey(.return, modifierFlags: [])
+        safePress(.return, [])
         let window = app.windows.matching(NSPredicate(format: "title BEGINSWITH 'openme'")).firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 10),
                       "no window titled openme; titles: \(app.windows.allElementsBoundByIndex.map { $0.title })")
@@ -120,8 +120,8 @@ final class OpenTypeSaveTests: QuickEditUITestCase {
         launch()
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
         textView.click()
-        app.typeText(typed)
-        app.typeKey("s", modifierFlags: .command)
+        safeType(typed)
+        safePress("s", .command)
         fillSavePanel(name: name, folder: folder, addTxtExtension: addTxtExtension)
     }
 

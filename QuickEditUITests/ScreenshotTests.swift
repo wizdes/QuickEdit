@@ -17,7 +17,7 @@ final class ScreenshotTests: QuickEditUITestCase {
             menu.click()
             RunLoop.current.run(until: Date().addingTimeInterval(0.6))
             attachScreenshot(String(format: "%02d-%@-menu", index + 2, title), XCUIScreen.main.screenshot())
-            app.typeKey(.escape, modifierFlags: [])
+            safePress(.escape, [])
             RunLoop.current.run(until: Date().addingTimeInterval(0.3))
         }
 
@@ -25,18 +25,18 @@ final class ScreenshotTests: QuickEditUITestCase {
         appMenu.click()
         RunLoop.current.run(until: Date().addingTimeInterval(0.6))
         attachScreenshot("06-app-menu", XCUIScreen.main.screenshot())
-        app.typeKey(.escape, modifierFlags: [])
+        safePress(.escape, [])
 
         textView.click()
-        app.typeText("shot")
-        app.typeKey("s", modifierFlags: .command)
+        safeType("shot")
+        safePress("s", .command)
         let sheet = savePanel()
         XCTAssertTrue(sheet.checkBoxes["If no extension is provided, use \u{201C}.txt\u{201D}."]
             .waitForExistence(timeout: 5))
         RunLoop.current.run(until: Date().addingTimeInterval(0.8))
         attachScreenshot("07-save-panel", window.screenshot())
         attachScreenshot("07b-save-panel-full-screen", XCUIScreen.main.screenshot())
-        app.typeKey(.escape, modifierFlags: [])
+        safePress(.escape, [])
         XCTAssertTrue(sheet.waitForNonExistence(timeout: 5))
     }
 }

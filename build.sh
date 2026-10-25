@@ -121,7 +121,7 @@ make_fixtures() {
     local name
     for name in open-type-save new-save boundary ext-on ext-off ext-md open-panel shots \
         transient external-clean external-edited locked close-named close-untitled \
-        rename-move rename-move/dest restore recent cascade revert encodings; do
+        rename-move rename-move/dest restore recent cascade revert encodings dark-mode; do
         mkdir -p "$dir/$name"
     done
     printf 'abc\n' >"$dir/open-type-save/hello.txt"
@@ -144,6 +144,9 @@ make_fixtures() {
     printf 'one\r\ntwo\r\n' >"$dir/encodings/crlf.txt"
     # M3+M5 review row 9 (QuickEditUITests/M35ReviewUITests.swift).
     printf 'abc\n' >"$dir/encodings/cancel.txt"
+    # The dark mode test opens this instead of typing 540 characters
+    # (QuickEditUITests/LayoutTests.swift, testDarkModeKeepsTextReadable).
+    awk 'BEGIN { for (i = 0; i < 20; i++) printf "readable text in dark mode\n" }' >"$dir/dark-mode/dark.txt"
     # About 1 MB of numbered lines; the restoration test selects line 13000.
     awk 'BEGIN { for (i = 0; i < 26000; i++) printf "line %d of the restoration fixture\n", i }' \
         >"$dir/restore/restore-1mb.txt"

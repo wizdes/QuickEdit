@@ -57,6 +57,42 @@ final class TextDocument: NSDocument {
         isTransient && !windowControllers.contains { $0.window?.attachedSheet != nil }
     }
 
+    /// The paper and margins for Wrap to Page and PDFs: Settings' paper
+    /// size when the document is made (new or opened), then kept, so an
+    /// open document does not change when the setting does (M7 review
+    /// item 4). AppKit may make documents on a background thread, hence
+    /// the lock.
+    private nonisolated let fixedPageLayout = Mutex(PageLayout.forNewDocument())
+    /// The print info `printInfo` hands out; made on first read.
+    private var ownPrintInfo: NSPrintInfo?
+    /// The PDF Save panel is open: a second Print… or Export waits (item 6).
+    private(set) var isPDFPanelOpen = false
+    /// Tests: replace the PDF Save panel and the PDF writer.
+    var pdfPanelRunner: PDFPanelRunner?
+    var pdfWriter: ((URL, PDFOptions) throws -> Void)?
+    /// How often AppKit asked for a print operation (tests; always refused).
+    private(set) var printOperationRequests = 0
+
+    /// Built from `pageLayout`, never copied from NSPrintInfo.shared:
+    /// QuickEdit has no Page Setup (U1). Kept here, not in NSDocument: its
+    /// setter records an undoable change, so a first read would mark the
+    /// document edited (M7 review item 3). Setting a print info (only tests
+    /// do) takes its paper and margins as the page layout.
+    /// `dynamic`, so a Swift caller goes through the Objective-C setter and
+    /// key-value observers (the window's page view) hear the change.
+    @objc dynamic override var printInfo: NSPrintInfo {
+        get {
+            if let ownPrintInfo { return ownPrintInfo }
+            let info = pageLayout.makePrintInfo()
+            ownPrintInfo = info
+            return info
+        }
+        set {
+            fixedPageLayout.withLock { $0 = PageLayout(printInfo: newValue) }
+            ownPrintInfo = newValue
+        }
+    }
+
     /// Shows the encoding and lossy-file alerts; tests put a fake here.
     lazy var alertPresenter: DocumentAlertPresenter = SheetAlertPresenter()
 
@@ -104,6 +140,9 @@ final class TextDocument: NSDocument {
         /// Makes the `com.apple.TextEncoding` write fail, as setxattr can
         /// (for example on a volume without extended attributes).
         var failAttributeWrite = false
+        /// Runs with the temporary PDF file after it is drawn and before it
+        /// is checked and moved, so a test can see its folder or remove it.
+        var pdfTemporaryFile: (@Sendable (URL) -> Void)?
     }
     nonisolated static let testHooks = Mutex(TestHooks())
     #endif
@@ -628,6 +667,9 @@ final class TextDocument: NSDocument {
     }
 
     override func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(printToPDF(_:)) || menuItem.action == #selector(saveToPDF(_:)) {
+            return !isPDFPanelOpen
+        }
         if menuItem.action == #selector(toggleReadOnly(_:)) {
             menuItem.title = preventsEditing ? "Allow Editing" : "Prevent Editing"
             return true
@@ -637,6 +679,199 @@ final class TextDocument: NSDocument {
             return true
         }
         return super.validateMenuItem(menuItem)
+    }
+}
+
+// MARK: PDF output (M7, user decision U1: no real printing)
+
+extension TextDocument {
+    /// The two TextEdit print options, chosen in the PDF Save panel.
+    struct PDFOptions: Equatable, Sendable {
+        var headerAndFooter: Bool
+        var wrappingToFit: Bool
+    }
+
+    /// Shows the PDF Save panel and calls back with the chosen file, or nil.
+    typealias PDFPanelRunner = (NSSavePanel, PrintPanelAccessoryController, @escaping (URL?) -> Void) -> Void
+
+    /// Paper and margins for Wrap to Page and PDFs, fixed when the
+    /// document was made (see `fixedPageLayout`).
+    nonisolated var pageLayout: PageLayout {
+        fixedPageLayout.withLock { $0 }
+    }
+
+    /// File > Print… (Cmd+P). A Save panel for a PDF, never the Print panel.
+    @objc func printToPDF(_ sender: Any?) {
+        runPDFSavePanel()
+    }
+
+    /// File > Export as PDF…: the same panel and the same pages as Print….
+    override func saveToPDF(_ sender: Any?) {
+        runPDFSavePanel()
+    }
+
+    /// A print request from outside the menus (Finder's File > Print, a
+    /// script, the print Apple event): QuickEdit's PDF Save panel, never
+    /// the Print panel and never NSDocument's print path (M7 review item
+    /// 8). The caller hears true when a PDF was written.
+    override func print(withSettings printSettings: [NSPrintInfo.AttributeKey: Any], showPrintPanel: Bool,
+                        delegate: Any?, didPrint didPrintSelector: Selector?,
+                        contextInfo: UnsafeMutableRawPointer?) {
+        let report: (Bool) -> Void = { [weak self] didPrint in
+            guard let self, let delegate = delegate as? NSObject, let didPrintSelector,
+                  let method = class_getInstanceMethod(type(of: delegate), didPrintSelector) else { return }
+            typealias DidPrint = @convention(c) (NSObject, Selector, NSDocument, ObjCBool, UnsafeMutableRawPointer?) -> Void
+            let call = unsafeBitCast(method_getImplementation(method), to: DidPrint.self)
+            call(delegate, didPrintSelector, self, ObjCBool(didPrint), contextInfo)
+        }
+        runPDFSavePanel(done: report)
+    }
+
+    /// NSDocument's print path asks for this. QuickEdit never prints
+    /// (U1), so it refuses with an error that says so.
+    override func printOperation(withSettings printSettings: [NSPrintInfo.AttributeKey: Any]) throws -> NSPrintOperation {
+        printOperationRequests += 1
+        throw CocoaError(.featureUnsupported, userInfo: [
+            NSLocalizedDescriptionKey: "QuickEdit does not print.",
+            NSLocalizedRecoverySuggestionErrorKey: "Use File > Print\u{2026} to save the document as a PDF.",
+        ])
+    }
+
+    /// A Save panel for a .pdf file with the two print options as its
+    /// accessory; on Save, writes the PDF. A failure is shown as an alert.
+    /// While the panel is open, another request opens nothing (and reports
+    /// false). `done` hears whether a PDF was written.
+    private func runPDFSavePanel(done: ((Bool) -> Void)? = nil) {
+        guard !isPDFPanelOpen else {
+            done?(false)
+            return
+        }
+        isPDFPanelOpen = true
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.pdf]
+        panel.canCreateDirectories = true
+        let baseName = fileURL?.deletingPathExtension().lastPathComponent ?? displayName ?? "Untitled"
+        panel.nameFieldStringValue = baseName + ".pdf"
+        let accessory = PrintPanelAccessoryController(showsWrappingToFit: !hasMultiplePages)
+        panel.accessoryView = accessory.view
+        let finish: (URL?) -> Void = { [weak self] url in
+            self?.isPDFPanelOpen = false
+            guard let self, let url else {
+                done?(false)
+                return
+            }
+            do {
+                if let pdfWriter = self.pdfWriter {
+                    try pdfWriter(url, accessory.options)
+                } else {
+                    try self.writePDF(to: url, options: accessory.options)
+                }
+                done?(true)
+            } catch {
+                done?(false)
+                if let window = self.windowControllers.first?.window {
+                    self.presentError(error, modalFor: window, delegate: nil, didPresent: nil, contextInfo: nil)
+                } else {
+                    self.presentError(error)
+                }
+            }
+        }
+        if let pdfPanelRunner {
+            pdfPanelRunner(panel, accessory, finish)
+        } else if let window = windowControllers.first?.window {
+            panel.beginSheetModal(for: window) { response in
+                finish(response == .OK ? panel.url : nil)
+            }
+        } else {
+            finish(panel.runModal() == .OK ? panel.url : nil)
+        }
+    }
+
+    /// Writes the PDF with QuickEdit's own drawing (`PDFRenderer`), never
+    /// the print system. It is drawn into a new private folder on the
+    /// target's volume and then moved to `url` in one step, so a failed
+    /// write leaves any old file as it was, and replacing a file on
+    /// another disk works (M7 review item 1). Before the move, the file
+    /// must be a whole PDF with every page drawn (`checkPDF`), so a partial
+    /// PDF never replaces a good one (M7 re-review item 1). Throws when no
+    /// whole PDF was written or the move fails; the folder is always removed.
+    func writePDF(to url: URL, options: PDFOptions) throws {
+        let files = FileManager.default
+        let folder = try files.url(for: .itemReplacementDirectory, in: .userDomainMask,
+                                   appropriateFor: url.deletingLastPathComponent(), create: true)
+        defer {
+            do {
+                try files.removeItem(at: folder)
+            } catch {
+                FileHandle.standardError.write(Data("QuickEdit: could not remove \(folder.path): \(error)\n".utf8))
+            }
+        }
+        let temporary = folder.appendingPathComponent(url.lastPathComponent)
+        let pages = try drawPDF(to: temporary, options: options)
+        #if DEBUG
+        Self.testHooks.withLock { $0.pdfTemporaryFile }?(temporary)
+        #endif
+        guard Self.checkPDF(at: temporary, pages: pages) else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [
+                NSURLErrorKey: url,
+                NSLocalizedDescriptionKey: "The PDF \u{201C}\(url.lastPathComponent)\u{201D} could not be written.",
+                NSLocalizedRecoverySuggestionErrorKey: "QuickEdit stopped before the PDF was finished.",
+            ])
+        }
+        if files.fileExists(atPath: url.path) {
+            // The Save panel asked already; replace in one step.
+            _ = try files.replaceItemAt(url, withItemAt: temporary)
+        } else {
+            try files.moveItem(at: temporary, to: url)
+        }
+    }
+
+    /// True when `url` is a whole PDF with `pages` pages: it ends with the
+    /// end-of-file marker Core Graphics writes last, Core Graphics opens
+    /// it, and it has that many pages. Uses CGPDFDocument, not PDFKit, so
+    /// the app does not link one more framework at launch.
+    nonisolated static func checkPDF(at url: URL, pages: Int) -> Bool {
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe), !data.isEmpty,
+              data.suffix(1024).range(of: Data("%%EOF".utf8)) != nil,
+              let pdf = CGPDFDocument(url as CFURL) else { return false }
+        return pdf.numberOfPages == pages
+    }
+
+    /// Lays out the pages and draws them to `url` (Document.m:633-677),
+    /// from a copy of the text with its own layout manager, so the
+    /// document's text never gets a second one. Returns the pages drawn.
+    @discardableResult
+    func drawPDF(to url: URL, options: PDFOptions) throws -> Int {
+        if windowControllers.isEmpty { makeWindowControllers() }
+        guard let controller = windowControllers.first as? DocumentWindowController else {
+            throw CocoaError(.featureUnsupported, userInfo: [
+                NSLocalizedDescriptionKey: "This document has no window to print from.",
+            ])
+        }
+        let layout = pageLayout
+        // TextEdit's job title: the window's view's printJobTitle (Document.m:662).
+        let title = controller.scrollView.documentView?.printJobTitle ?? displayName ?? "Untitled"
+        let header = options.headerAndFooter ? PDFRenderer.Header(title: title, date: PDFRenderer.Header.dateText(for: Date())) : nil
+        let pagination: PDFRenderer.Pagination
+        if hasMultiplePages, let pagesView = controller.pagesView {
+            // The pages shown on screen: the page's text width at full
+            // size, the text where the page's text view puts it. Every page
+            // is laid out on screen too, as printing did (Document.m:643-645).
+            controller.layOutWholeText()
+            let paper = pagesView.pageRect(forPage: 0)
+            let text = pagesView.documentRect(forPage: 0)
+            pagination = PDFRenderer.Pagination(text: textStorage, width: layout.documentSizeInPage.width, layout: layout,
+                                                origin: NSPoint(x: text.minX - paper.minX, y: text.minY - paper.minY),
+                                                scalesToFit: false)
+        } else {
+            // The page's text width (Rewrap on) or the window's (off),
+            // scaled to fit; the container starts at the margins.
+            let width = options.wrappingToFit ? layout.documentSizeInPage.width : controller.textView.frame.width
+            pagination = PDFRenderer.Pagination(text: textStorage, width: width, layout: layout,
+                                                origin: NSPoint(x: layout.leftMargin, y: layout.topMargin),
+                                                scalesToFit: true)
+        }
+        return try PDFRenderer.write(pagination, layout: layout, header: header, to: url)
     }
 }
 

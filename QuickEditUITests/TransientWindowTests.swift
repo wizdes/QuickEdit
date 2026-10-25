@@ -16,16 +16,16 @@ final class TransientWindowTests: QuickEditUITestCase {
         let untitledFrame = app.windows.firstMatch.frame
         XCTAssertEqual(untitledFrame.minX, 40, accuracy: 1, "the untitled window was not moved: \(untitledFrame)")
 
-        app.typeKey("o", modifierFlags: .command)
+        safePress("o", .command)
         // On macOS 27 the Open panel is a window titled "Open", not a sheet or a dialog.
         XCTAssertTrue(app.windows["Open"].waitForExistence(timeout: 5) || app.sheets.firstMatch.exists
                       || app.dialogs.firstMatch.exists, "no Open panel")
-        app.typeKey("g", modifierFlags: [.command, .shift])
+        safePress("g", [.command, .shift])
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
-        app.typeText(url.path)
-        app.typeKey(.return, modifierFlags: [])
+        safeType(url.path)
+        safePress(.return, [])
         RunLoop.current.run(until: Date().addingTimeInterval(1.0))
-        app.typeKey(.return, modifierFlags: [])
+        safePress(.return, [])
 
         let window = app.windows.matching(NSPredicate(format: "title BEGINSWITH 'replace'")).firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 10))
@@ -38,17 +38,17 @@ final class TransientWindowTests: QuickEditUITestCase {
         let url = try fixtureFolder("transient").appendingPathComponent("replace.txt")
         launch()
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
-        app.typeText("keep me")
-        app.typeKey("o", modifierFlags: .command)
-        app.typeKey("g", modifierFlags: [.command, .shift])
+        safeType("keep me")
+        safePress("o", .command)
+        safePress("g", [.command, .shift])
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
-        app.typeText(url.path)
-        app.typeKey(.return, modifierFlags: [])
+        safeType(url.path)
+        safePress(.return, [])
         RunLoop.current.run(until: Date().addingTimeInterval(1.0))
-        app.typeKey(.return, modifierFlags: [])
+        safePress(.return, [])
         waitUntil(10, "an edited untitled window must stay") { self.app.windows.count == 2 }
         // Leave nothing to save at teardown.
         app.windows.element(boundBy: 1).click()
-        app.typeKey("z", modifierFlags: .command)
+        safePress("z", .command)
     }
 }

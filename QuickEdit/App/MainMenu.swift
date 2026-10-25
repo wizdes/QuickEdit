@@ -81,6 +81,15 @@ enum MainMenu {
         menu.addItem(item("Save All", #selector(NSDocumentController.saveAllDocuments(_:))))
         // With autosavesInPlace, AppKit turns this item into the "Revert To" submenu.
         menu.addItem(item("Revert to Saved", #selector(NSDocument.revertToSaved(_:))))
+        // User decision U1: no real printing. Both items show a Save panel
+        // for a PDF (TextDocument). Print… has its own action, and
+        // TextDocument sends printDocument: (Finder, scripts) to the same
+        // panel, so nothing reaches the system Print panel. Show
+        // Properties and Page Setup… are left out (Edit.nib:315-363).
+        menu.addItem(.separator())
+        menu.addItem(item("Export as PDF\u{2026}", #selector(NSDocument.saveToPDF(_:))))
+        menu.addItem(.separator())
+        menu.addItem(item("Print\u{2026}", #selector(TextDocument.printToPDF(_:)), "p"))
         return menu
     }
 

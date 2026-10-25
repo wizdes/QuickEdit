@@ -12,3 +12,14 @@
 | 8 | Finder File > Print or a script reaches NSDocument's default and shows an error | Opus (uncertain) | Accept: route it to the PDF Save panel. |
 | 9 | Two alerts at once when printing fails for a reason like a full disk | Opus (uncertain) | Follow-up. |
 | 10 | Large Wrap to Page documents may freeze while every page is laid out | Opus (uncertain) | Measure in row 6; M8 if slow. |
+
+## Re-review of the new PDF drawing code (Astra, 2026-10-24)
+
+After row 2, the builder measured that NSPrintOperation always contacts the print helper, so QuickEdit now draws PDFs itself (`PDFRenderer.swift`).
+
+| # | Finding | Decision |
+| --- | --- | --- |
+| 11 | A partial PDF can replace a good file: only the temp file's existence is checked | Accept. Open the temp PDF and match its page count before replacing; test with a truncated file. |
+| 12 | A line taller than a page runs past the footer and the paper edge | Accept. Clip to the text area; test with a 900 pt font. |
+| 13 | The full fixture matrix (3 fixtures x 2 modes x header x rewrap) is incomplete | Accept. One table-driven test; add CR-only and trailing-empty-line cases. |
+| 14 | 100 MB memory and responsiveness of PDF output not measured | M8. |

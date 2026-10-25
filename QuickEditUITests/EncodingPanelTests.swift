@@ -18,7 +18,7 @@ final class EncodingPanelTests: QuickEditUITestCase {
         let url = try fixtureFolder("encodings").appendingPathComponent("utf8.txt")
         launch()
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
-        app.typeKey("o", modifierFlags: .command)
+        safePress("o", .command)
         // On macOS 27 the Open panel is a window titled "Open" (identifier
         // "open-panel"), not a sheet or a dialog.
         let openWindow = app.windows["Open"]
@@ -30,12 +30,12 @@ final class EncodingPanelTests: QuickEditUITestCase {
         XCTAssertEqual(popUp.value as? String, "Automatic", "the pop-up starts at Automatic")
         attachScreenshot("open-panel-encoding", app.windows.firstMatch.screenshot())
         choose("Western (Windows Latin 1)", in: popUp)
-        app.typeKey("g", modifierFlags: [.command, .shift])
+        safePress("g", [.command, .shift])
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
-        app.typeText(url.path)
-        app.typeKey(.return, modifierFlags: [])
+        safeType(url.path)
+        safePress(.return, [])
         RunLoop.current.run(until: Date().addingTimeInterval(1.0))
-        app.typeKey(.return, modifierFlags: [])
+        safePress(.return, [])
         let window = app.windows.matching(NSPredicate(format: "title BEGINSWITH 'utf8'")).firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 10))
         XCTAssertEqual(window.textViews.firstMatch.value as? String, "caf\u{C3}\u{A9}\n")
@@ -46,8 +46,8 @@ final class EncodingPanelTests: QuickEditUITestCase {
         let folder = try fixtureFolder("encodings")
         launch()
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
-        app.typeText("caf\u{E9}")
-        app.typeKey("s", modifierFlags: .command)
+        safeType("caf\u{E9}")
+        safePress("s", .command)
         let sheet = savePanel()
         let popUp = sheet.popUpButtons["saveEncoding"]
         XCTAssertEqual(popUp.value as? String, "Unicode (UTF-8)", "a new document starts at UTF-8")
@@ -64,8 +64,8 @@ final class EncodingPanelTests: QuickEditUITestCase {
         launch(opening: url.path)
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
         XCTAssertEqual(text, "caf\u{E9}\n")
-        app.typeKey(.downArrow, modifierFlags: .command)
-        app.typeText("\u{3A9}") // Greek capital omega: not in Windows Latin 1
+        safePress(.downArrow, .command)
+        safeType("\u{3A9}") // Greek capital omega: not in Windows Latin 1
         let sheet = app.sheets.firstMatch
         XCTAssertTrue(sheet.waitForExistence(timeout: 5), "no encoding sheet")
         let sheetText = sheet.staticTexts.allElementsBoundByIndex.compactMap { $0.value as? String }.joined(separator: " ")
@@ -82,11 +82,11 @@ final class EncodingPanelTests: QuickEditUITestCase {
         let url = try fixtureFolder("encodings").appendingPathComponent("crlf.txt")
         launch(opening: url.path)
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
-        app.typeKey(.downArrow, modifierFlags: .command)
-        app.typeText("x")
-        app.typeKey(.return, modifierFlags: [])
-        app.typeText("y")
-        app.typeKey("s", modifierFlags: .command)
+        safePress(.downArrow, .command)
+        safeType("x")
+        safePress(.return, [])
+        safeType("y")
+        safePress("s", .command)
         waitForBytes(url, Array("one\r\ntwo\r\nx\r\ny".utf8))
     }
 }

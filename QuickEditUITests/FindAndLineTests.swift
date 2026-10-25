@@ -12,19 +12,19 @@ final class FindAndLineTests: QuickEditUITestCase {
         launch(extraArguments: extraArguments)
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
         textView.click()
-        app.typeText(text)
+        safeType(text)
         XCTAssertEqual(self.text, text, "typing changed the text")
     }
 
     /// The current selection, read through Cmd+E and the find field. Leaves
     /// the find bar closed and the text view focused.
     private func selectedText(file: StaticString = #filePath, line: UInt = #line) -> String? {
-        app.typeKey("e", modifierFlags: .command)
-        app.typeKey("f", modifierFlags: .command)
+        safePress("e", .command)
+        safePress("f", .command)
         let search = app.searchFields.firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 5), "no find bar", file: file, line: line)
         let value = search.value as? String
-        app.typeKey(.escape, modifierFlags: [])
+        safePress(.escape, [])
         return value
     }
 
@@ -33,15 +33,15 @@ final class FindAndLineTests: QuickEditUITestCase {
     /// Cmd+F shows the find bar; typing in it finds a match and selects it.
     func testTypingInFindBarFindsAMatch() {
         launchWithText("1 owl 2 owl")
-        app.typeKey(.upArrow, modifierFlags: .command)
-        app.typeKey("f", modifierFlags: .command)
+        safePress(.upArrow, .command)
+        safePress("f", .command)
         let search = app.searchFields.firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 5), "Cmd+F did not show the find bar")
-        search.typeText("owl")
-        search.typeKey(.return, modifierFlags: [])
+        safeType("owl", into: search)
+        safePress(.return, [], on: search)
         // Escape closes the bar and keeps the match selected; typing replaces it.
-        app.typeKey(.escape, modifierFlags: [])
-        app.typeText("Z")
+        safePress(.escape, [])
+        safeType("Z")
         XCTAssertTrue(["1 Z 2 owl", "1 owl 2 Z"].contains(text), "the find bar selected no match: \(text)")
         attachScreenshot("find-typing", app.windows.firstMatch.screenshot())
     }
@@ -50,36 +50,36 @@ final class FindAndLineTests: QuickEditUITestCase {
     /// wraps around to the first match.
     func testUseSelectionThenFindNextAndWrap() {
         launchWithText("1 dog 2 dog 3 dog")
-        app.typeKey(.upArrow, modifierFlags: .command)
-        app.typeKey(.rightArrow, modifierFlags: [])
-        app.typeKey(.rightArrow, modifierFlags: [])
-        app.typeKey(.rightArrow, modifierFlags: [.option, .shift]) // selects the first "dog"
-        app.typeKey("e", modifierFlags: .command)
-        app.typeKey("g", modifierFlags: .command)
-        app.typeText("B")
+        safePress(.upArrow, .command)
+        safePress(.rightArrow, [])
+        safePress(.rightArrow, [])
+        safePress(.rightArrow, [.option, .shift]) // selects the first "dog"
+        safePress("e", .command)
+        safePress("g", .command)
+        safeType("B")
         XCTAssertEqual(text, "1 dog 2 B 3 dog")
-        app.typeKey("g", modifierFlags: .command)
-        app.typeText("C")
+        safePress("g", .command)
+        safeType("C")
         XCTAssertEqual(text, "1 dog 2 B 3 C")
-        app.typeKey("g", modifierFlags: .command) // wraps to the start
-        app.typeText("A")
+        safePress("g", .command) // wraps to the start
+        safeType("A")
         XCTAssertEqual(text, "1 A 2 B 3 C")
     }
 
     /// Shift+Cmd+G moves backwards and wraps around to the last match.
     func testFindPreviousAndWrap() {
         launchWithText("1 fox 2 fox 3 fox")
-        app.typeKey(.downArrow, modifierFlags: .command)
-        app.typeKey(.leftArrow, modifierFlags: [.option, .shift]) // selects the last "fox"
-        app.typeKey("e", modifierFlags: .command)
-        app.typeKey("g", modifierFlags: [.command, .shift])
-        app.typeText("B")
+        safePress(.downArrow, .command)
+        safePress(.leftArrow, [.option, .shift]) // selects the last "fox"
+        safePress("e", .command)
+        safePress("g", [.command, .shift])
+        safeType("B")
         XCTAssertEqual(text, "1 fox 2 B 3 fox")
-        app.typeKey("g", modifierFlags: [.command, .shift])
-        app.typeText("A")
+        safePress("g", [.command, .shift])
+        safeType("A")
         XCTAssertEqual(text, "1 A 2 B 3 fox")
-        app.typeKey("g", modifierFlags: [.command, .shift]) // wraps to the end
-        app.typeText("C")
+        safePress("g", [.command, .shift]) // wraps to the end
+        safeType("C")
         XCTAssertEqual(text, "1 A 2 B 3 C")
     }
 
@@ -87,20 +87,20 @@ final class FindAndLineTests: QuickEditUITestCase {
     /// replaces every match whatever its case.
     func testReplaceAllIgnoringCase() {
         launchWithText("1 Fox 2 fox 3 FOX")
-        app.typeKey("f", modifierFlags: [.command, .option])
+        safePress("f", [.command, .option])
         let find = app.searchFields.firstMatch
         XCTAssertTrue(find.waitForExistence(timeout: 5), "Opt+Cmd+F did not show the find bar")
         // Opt+Cmd+F puts the focus in the replace field, and the find field
         // may hold an earlier search (the find pasteboard is shared), so
         // focus the find field and replace what is in it.
         find.click()
-        find.typeKey("a", modifierFlags: .command)
-        find.typeText("fox")
+        safePress("a", .command, on: find)
+        safeType("fox", into: find)
         // The replace field is the second field of the bar.
         let replace = app.searchFields.count > 1 ? app.searchFields.element(boundBy: 1) : app.textFields.firstMatch
         XCTAssertTrue(replace.waitForExistence(timeout: 5), "no replace field")
         replace.click()
-        replace.typeText("cat")
+        safeType("cat", into: replace)
         let all = app.buttons["All"].exists ? app.buttons["All"] : app.buttons["Replace All"]
         XCTAssertTrue(all.waitForExistence(timeout: 5), "no Replace All button; buttons: \(app.buttons.allElementsBoundByIndex.map(\.title))")
         attachScreenshot("replace-bar", app.windows.firstMatch.screenshot())
@@ -114,31 +114,31 @@ final class FindAndLineTests: QuickEditUITestCase {
     /// with no target, and the key window's text view does it.
     func testCopyPasteUndoRedoCutInTheKeyWindow() {
         launchWithText("1 alpha 2 beta")
-        app.typeKey(.upArrow, modifierFlags: .command)
-        app.typeKey(.rightArrow, modifierFlags: [])
-        app.typeKey(.rightArrow, modifierFlags: [])
-        app.typeKey(.rightArrow, modifierFlags: [.option, .shift]) // selects "alpha"
-        app.typeKey("c", modifierFlags: .command)
+        safePress(.upArrow, .command)
+        safePress(.rightArrow, [])
+        safePress(.rightArrow, [])
+        safePress(.rightArrow, [.option, .shift]) // selects "alpha"
+        safePress("c", .command)
         XCTAssertEqual(text, "1 alpha 2 beta", "Copy changed the text")
-        app.typeKey(.downArrow, modifierFlags: .command)
-        app.typeKey("v", modifierFlags: .command)
+        safePress(.downArrow, .command)
+        safePress("v", .command)
         XCTAssertEqual(text, "1 alpha 2 betaalpha", "Paste did not insert the copied word")
-        app.typeKey("z", modifierFlags: .command)
+        safePress("z", .command)
         XCTAssertEqual(text, "1 alpha 2 beta", "Undo did not take back Paste")
-        app.typeKey("z", modifierFlags: [.command, .shift])
+        safePress("z", [.command, .shift])
         XCTAssertEqual(text, "1 alpha 2 betaalpha", "Redo did not paste again")
 
-        app.typeKey(.upArrow, modifierFlags: .command)
-        app.typeKey(.rightArrow, modifierFlags: [])
-        app.typeKey(.rightArrow, modifierFlags: [])
-        app.typeKey(.rightArrow, modifierFlags: [.option, .shift])
-        app.typeKey("x", modifierFlags: .command)
+        safePress(.upArrow, .command)
+        safePress(.rightArrow, [])
+        safePress(.rightArrow, [])
+        safePress(.rightArrow, [.option, .shift])
+        safePress("x", .command)
         XCTAssertEqual(text, "1  2 betaalpha", "Cut did not remove the word")
-        app.typeKey(.downArrow, modifierFlags: .command)
-        app.typeKey("v", modifierFlags: .command)
+        safePress(.downArrow, .command)
+        safePress("v", .command)
         XCTAssertEqual(text, "1  2 betaalphaalpha", "Paste after Cut did not insert the cut word")
-        app.typeKey("z", modifierFlags: .command)
-        app.typeKey("z", modifierFlags: .command)
+        safePress("z", .command)
+        safePress("z", .command)
         XCTAssertEqual(text, "1 alpha 2 betaalpha", "Undo did not take back Paste and Cut")
     }
 
@@ -153,28 +153,28 @@ final class FindAndLineTests: QuickEditUITestCase {
     /// Cmd+L, type 20, Return: line 20 is selected and the panel closes.
     func testSelectLineSelectsTheLine() {
         launchWithText(Self.twentyLines)
-        app.typeKey(.upArrow, modifierFlags: .command)
-        app.typeKey("l", modifierFlags: .command)
+        safePress(.upArrow, .command)
+        safePress("l", .command)
         let panel = selectLinePanel
         XCTAssertTrue(panel.waitForExistence(timeout: 5), "Cmd+L did not open the Select Line panel")
         let field = panel.textFields.firstMatch
         XCTAssertEqual(field.placeholderValue, "Line number")
         attachScreenshot("select-line-panel", panel.screenshot())
-        app.typeText("20")
-        app.typeKey(.return, modifierFlags: [])
+        safeType("20")
+        safePress(.return, [])
         XCTAssertTrue(panel.waitForNonExistence(timeout: 5), "Return did not close the panel after a good entry")
         XCTAssertEqual(selectedText(), "L20")
 
         // A range, chosen with the Select button: the panel stays open.
-        app.typeKey("l", modifierFlags: .command)
+        safePress("l", .command)
         XCTAssertTrue(panel.waitForExistence(timeout: 5))
-        field.typeKey("a", modifierFlags: .command)
-        app.typeText("3-4")
+        safePress("a", .command, on: field)
+        safeType("3-4")
         panel.buttons["Select"].click()
         XCTAssertTrue(panel.exists, "the Select button closed the panel")
-        panel.typeKey("w", modifierFlags: .command)
+        safePress("w", .command, on: panel)
         XCTAssertTrue(panel.waitForNonExistence(timeout: 5))
-        app.typeText("X")
+        safeType("X")
         XCTAssertTrue(text.hasPrefix("L1\nL2\nXL5\n"), "lines 3 to 4 were not selected: \(text.prefix(20).debugDescription)")
     }
 
@@ -182,16 +182,16 @@ final class FindAndLineTests: QuickEditUITestCase {
     /// (main) window only.
     func testSelectLineActsOnTheFrontWindowOnly() {
         launchWithText(Self.twentyLines)
-        app.typeKey("n", modifierFlags: .command)
+        safePress("n", .command)
         waitUntil(5, "Cmd+N did not open a second window") { self.app.windows.count >= 2 }
-        app.typeText("1\n2\n3")
-        app.typeKey("l", modifierFlags: .command)
+        safeType("1\n2\n3")
+        safePress("l", .command)
         let panel = selectLinePanel
         XCTAssertTrue(panel.waitForExistence(timeout: 5))
-        app.typeText("2")
-        app.typeKey(.return, modifierFlags: [])
+        safeType("2")
+        safePress(.return, [])
         XCTAssertTrue(panel.waitForNonExistence(timeout: 5))
-        app.typeText("X")
+        safeType("X")
         let texts = app.textViews.allElementsBoundByIndex.map { ($0.value as? String) ?? "" }
         XCTAssertTrue(texts.contains("1\nX3"), "line 2 of the front window was not selected: \(texts)")
         XCTAssertTrue(texts.contains(Self.twentyLines), "the back window changed: \(texts)")
@@ -204,16 +204,16 @@ final class FindAndLineTests: QuickEditUITestCase {
         // label (QuickEdit/App/TestHooks.swift), so the test reads it without
         // keys: Cmd+E would act on the focused find field.
         launchWithText(Self.twentyLines, extraArguments: ["-QETestExposeSelection", "YES"])
-        app.typeKey(.upArrow, modifierFlags: .command)
-        app.typeKey("f", modifierFlags: .command)
+        safePress(.upArrow, .command)
+        safePress("f", .command)
         let search = app.searchFields.firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 5), "Cmd+F did not show the find bar")
-        search.typeText("L1")
-        app.typeKey("l", modifierFlags: .command)
+        safeType("L1", into: search)
+        safePress("l", .command)
         let panel = selectLinePanel
         XCTAssertTrue(panel.waitForExistence(timeout: 5))
-        app.typeText("20")
-        app.typeKey(.return, modifierFlags: [])
+        safeType("20")
+        safePress(.return, [])
         XCTAssertTrue(panel.waitForNonExistence(timeout: 5), "Return did not close the panel after a good entry")
         XCTAssertFalse(app.staticTexts["Invalid line specification \u{201C}20\u{201D}."].exists,
                        "Select Line looked for line 20 in the find field")
@@ -225,7 +225,7 @@ final class FindAndLineTests: QuickEditUITestCase {
         waitUntil(5, "the selection is \(self.textView.label.debugDescription)") {
             self.textView.label == "selection:L20"
         }
-        app.typeKey(.escape, modifierFlags: [])
+        safePress(.escape, [])
         let focused = NSPredicate(format: "hasKeyboardFocus == true")
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: focused, object: textView)], timeout: 5),
                        .completed, "the text view did not get the focus back after Escape")
@@ -234,16 +234,16 @@ final class FindAndLineTests: QuickEditUITestCase {
     /// A bad entry shows TextEdit's message on the panel.
     func testSelectLineRejectsBadEntry() {
         launchWithText(Self.twentyLines)
-        app.typeKey("l", modifierFlags: .command)
+        safePress("l", .command)
         let panel = selectLinePanel
         XCTAssertTrue(panel.waitForExistence(timeout: 5))
-        app.typeText("99")
-        app.typeKey(.return, modifierFlags: [])
+        safeType("99")
+        safePress(.return, [])
         let message = app.staticTexts["Invalid line specification \u{201C}99\u{201D}."]
         XCTAssertTrue(message.waitForExistence(timeout: 5), "no error for line 99 of 20")
         XCTAssertTrue(app.staticTexts["Enter a line number or a range of line numbers to select."].exists)
         attachScreenshot("select-line-error", panel.screenshot())
-        app.typeKey(.return, modifierFlags: []) // OK
+        safePress(.return, []) // OK
         XCTAssertTrue(message.waitForNonExistence(timeout: 5))
         XCTAssertTrue(panel.exists, "the panel closed after a bad entry")
     }

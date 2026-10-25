@@ -5,12 +5,20 @@ import AppKit
 /// page's text view is a subview. Port of reference/apple/MultiplePageView.m
 /// without the vertical-layout branches.
 final class MultiplePageView: NSView {
-    /// A copy of the document's print info; it sets the page size and margins.
-    var printInfo: NSPrintInfo {
+    /// Paper size and margins. A plain value, so drawing and paging never
+    /// ask an NSPrintInfo for its paper (that reaches the print helper).
+    var layout: PageLayout {
         didSet {
+            guard layout != oldValue else { return }
             updateFrame()
             needsDisplay = true
         }
+    }
+
+    /// The layout as a print info. Setting one reads its paper and margins.
+    var printInfo: NSPrintInfo {
+        get { layout.makePrintInfo() }
+        set { layout = PageLayout(printInfo: newValue) }
     }
 
     private(set) var numberOfPages = 0
@@ -21,13 +29,17 @@ final class MultiplePageView: NSView {
     /// Gap between pages (MultiplePageView.m:121-123).
     let pageSeparatorHeight: CGFloat = 5.0
 
-    init(printInfo: NSPrintInfo) {
-        self.printInfo = printInfo.copy() as! NSPrintInfo
+    init(layout: PageLayout) {
+        self.layout = layout
         super.init(frame: .zero)
         // Pages are paper: they stay white with dark text in dark mode, as
         // TextEdit's do. The text views are subviews, so they inherit this
         // and NSColor.textColor resolves to black on them.
         appearance = NSAppearance(named: .aqua)
+    }
+
+    convenience init(printInfo: NSPrintInfo) {
+        self.init(layout: PageLayout(printInfo: printInfo))
     }
 
     @available(*, unavailable)
@@ -44,7 +56,7 @@ final class MultiplePageView: NSView {
     /// Height = pages x paper height + the gaps between them (MultiplePageView.m:75-89).
     func updateFrame() {
         guard let superview else { return }
-        var size = printInfo.paperSize
+        var size = layout.paperSize
         size.height *= CGFloat(numberOfPages)
         if numberOfPages > 1 { size.height += pageSeparatorHeight * CGFloat(numberOfPages - 1) }
         setFrameSize(convert(size, to: superview))
@@ -63,29 +75,26 @@ final class MultiplePageView: NSView {
 
     /// Paper minus margins, plus the line padding on both sides (MultiplePageView.m:297-302).
     static func documentSize(for printInfo: NSPrintInfo) -> NSSize {
-        var size = printInfo.paperSize
-        size.width -= (printInfo.leftMargin + printInfo.rightMargin) - textPadding * 2
-        size.height -= printInfo.topMargin + printInfo.bottomMargin
-        return size
+        PageLayout(printInfo: printInfo).documentSizeInPage
     }
 
     /// TextEdit's defaultTextPadding(): a new container's line fragment padding.
     static let textPadding: CGFloat = NSTextContainer().lineFragmentPadding
 
-    var documentSizeInPage: NSSize { Self.documentSize(for: printInfo) }
+    var documentSizeInPage: NSSize { layout.documentSizeInPage }
 
     /// The text view's frame on page `page` (0-based): inside the margins,
     /// moved left by the padding (MultiplePageView.m:134-140).
     func documentRect(forPage page: Int) -> NSRect {
         var rect = pageRect(forPage: page)
-        rect.origin.x += printInfo.leftMargin - Self.textPadding
-        rect.origin.y += printInfo.topMargin
+        rect.origin.x += layout.leftMargin - Self.textPadding
+        rect.origin.y += layout.topMargin
         rect.size = documentSizeInPage
         return rect
     }
 
     func pageRect(forPage page: Int) -> NSRect {
-        let paper = printInfo.paperSize
+        let paper = layout.paperSize
         return NSRect(x: 0, y: (paper.height + pageSeparatorHeight) * CGFloat(page),
                       width: paper.width, height: paper.height)
     }
@@ -95,7 +104,7 @@ final class MultiplePageView: NSView {
     func pageNumber(for point: NSPoint) -> Int {
         if point.y < 0 { return 0 }
         if point.y >= bounds.height { return max(0, numberOfPages - 1) }
-        return min(Int(point.y / (printInfo.paperSize.height + pageSeparatorHeight)), max(0, numberOfPages - 1))
+        return min(Int(point.y / (layout.paperSize.height + pageSeparatorHeight)), max(0, numberOfPages - 1))
     }
 
     /// On screen only: margin color everywhere, a 1 pt frame around each
@@ -103,7 +112,7 @@ final class MultiplePageView: NSView {
     /// (MultiplePageView.m:207-247).
     override func draw(_ dirtyRect: NSRect) {
         guard NSGraphicsContext.current?.isDrawingToScreen ?? false, numberOfPages > 0 else { return }
-        let step = printInfo.paperSize.height + pageSeparatorHeight
+        let step = layout.paperSize.height + pageSeparatorHeight
         let firstPage = max(0, Int(dirtyRect.minY / step))
         let lastPage = min(numberOfPages - 1, Int(dirtyRect.maxY / step))
 
@@ -149,7 +158,8 @@ final class MultiplePageView: NSView {
         return result
     }
 
-    // MARK: Printing (M7 prints this view directly; MultiplePageView.m:278-292)
+    // MARK: Printing (MultiplePageView.m:278-292). QuickEdit's PDFs do not
+    // print this view (PDFRenderer draws them); kept for AppKit's own use.
 
     override func knowsPageRange(_ range: NSRangePointer) -> Bool {
         range.pointee = NSRange(location: 1, length: numberOfPages)
@@ -161,7 +171,7 @@ final class MultiplePageView: NSView {
     }
 
     override func locationOfPrintRect(_ rect: NSRect) -> NSPoint {
-        let paper = printInfo.paperSize
+        let paper = layout.paperSize
         return NSPoint(x: (paper.width - rect.width) / 2, y: (paper.height - rect.height) / 2)
     }
 }

@@ -90,8 +90,8 @@ class QuickEditUITestCase: XCTestCase {
         if let addTxtExtension {
             let nameField = sheet.textFields.firstMatch
             nameField.click()
-            nameField.typeKey("a", modifierFlags: .command)
-            app.typeText(name)
+            safePress("a", .command, on: nameField)
+            safeType(name)
             let checkbox = sheet.checkBoxes["If no extension is provided, use \u{201C}.txt\u{201D}."]
             XCTAssertTrue(checkbox.waitForExistence(timeout: 5), "no .txt checkbox", file: file, line: line)
             let isOn = (checkbox.value as? Int ?? (checkbox.value as? NSNumber)?.intValue ?? 0) == 1
@@ -99,16 +99,16 @@ class QuickEditUITestCase: XCTestCase {
             XCTAssertEqual(nameField.value as? String, name, "the .txt checkbox changed the typed name",
                            file: file, line: line)
         } else {
-            app.typeText(name)
+            safeType(name)
         }
-        app.typeKey("g", modifierFlags: [.command, .shift])
+        safePress("g", [.command, .shift])
         let goTo = sheet.sheets.firstMatch.exists ? sheet.sheets.firstMatch : sheet
         _ = goTo.textFields.firstMatch.waitForExistence(timeout: 5)
-        app.typeText(folder.path)
-        app.typeKey(.return, modifierFlags: [])
+        safeType(folder.path)
+        safePress(.return, [])
         // Let the panel settle on the folder, then press Save.
         RunLoop.current.run(until: Date().addingTimeInterval(1.0))
-        app.typeKey(.return, modifierFlags: [])
+        safePress(.return, [])
         XCTAssertTrue(sheet.waitForNonExistence(timeout: 10), "Save panel did not close", file: file, line: line)
     }
 

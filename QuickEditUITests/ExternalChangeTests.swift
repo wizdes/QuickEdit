@@ -21,12 +21,12 @@ final class ExternalChangeTests: QuickEditUITestCase {
         let url = try fixtureFolder("external-edited").appendingPathComponent("outside.txt")
         launch(opening: url.path, extraArguments: ["-QETestExternalWrite", url.path, "-QETestExternalWriteText", "theirs\\n", "-QETestExternalWriteDelay", "4"])
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
-        app.typeKey(.downArrow, modifierFlags: .command)
-        app.typeText("mine")
+        safePress(.downArrow, .command)
+        safeType("mine")
         waitForBytes(url, Array("theirs\n".utf8), timeout: 10)
         RunLoop.current.run(until: Date().addingTimeInterval(4)) // past the ~3 s notice
         XCTAssertEqual(text, "before\nmine", "an edited document must not reload")
-        app.typeKey("s", modifierFlags: .command)
+        safePress("s", .command)
         let sheet = app.sheets.firstMatch
         XCTAssertTrue(sheet.waitForExistence(timeout: 10), "no conflict sheet on Save")
         let sheetText = sheet.staticTexts.allElementsBoundByIndex.map(\.value).compactMap { $0 as? String }.joined(separator: " ")
@@ -38,7 +38,7 @@ final class ExternalChangeTests: QuickEditUITestCase {
         // Save Anyway, and no Cancel; Revert keeps the other app's bytes.
         if sheet.buttons["Cancel"].exists {
             sheet.buttons["Cancel"].click()
-            app.typeKey("z", modifierFlags: .command)
+            safePress("z", .command)
         } else {
             sheet.buttons["Revert"].click()
         }

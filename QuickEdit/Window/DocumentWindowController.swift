@@ -114,7 +114,8 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
         center.addObserver(self, selector: #selector(documentTextDidProcessEditing(_:)),
                            name: NSTextStorage.didProcessEditingNotification, object: document.textStorage)
 
-        // Page Setup changes resize every page (DocumentWindowController.m:220-222, :264-279).
+        // A new print info resizes every page (DocumentWindowController.m:220-222,
+        // :264-279). QuickEdit has no Page Setup (U1); tests set one.
         observations.append(document.observe(\.printInfo) { [weak self] _, _ in
             MainActor.assumeIsolated { self?.printInfoUpdated() }
         })
@@ -144,8 +145,9 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
         let hadViews = !layoutManager.textContainers.isEmpty
 
         if pages {
-            let printInfo = textDocument?.printInfo ?? NSPrintInfo.shared
-            let pagesView = MultiplePageView(printInfo: printInfo)
+            // The document's paper as a plain value: no NSPrintInfo is asked
+            // for its paper, so Wrap to Page never reaches the print helper (M7).
+            let pagesView = MultiplePageView(layout: textDocument?.pageLayout ?? .forNewDocument())
             scrollView.documentView = pagesView
             // The first page goes in front of the old view, not after it:
             // AppKit hands the shared input context to a view inserted
@@ -302,11 +304,11 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
         }
     }
 
-    /// Page Setup changed: copy the print info and resize every page
-    /// (DocumentWindowController.m:264-279).
+    /// The document's print info changed: take its paper and margins and
+    /// resize every page (DocumentWindowController.m:264-279).
     func printInfoUpdated() {
-        guard hasMultiplePages, let pagesView, let textDocument else { return }
-        pagesView.printInfo = textDocument.printInfo
+        guard hasMultiplePages, let pagesView, let textDocument, pagesView.layout != textDocument.pageLayout else { return }
+        pagesView.layout = textDocument.pageLayout
         var page = 0
         // Re-read the counts each time: resizing a page can add or remove pages.
         while page < min(numberOfPages, layoutManager.textContainers.count) {
@@ -316,6 +318,13 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
             container.textView?.frame = frame
             page += 1
         }
+    }
+
+    /// Lays out the whole text, so Wrap to Page has every page; printing
+    /// needs them all (Document.m:643-645). Only the print path calls this.
+    func layOutWholeText() {
+        let length = layoutManager.textStorage?.length ?? 0
+        layoutManager.ensureLayout(forCharacterRange: NSRange(location: 0, length: length))
     }
 
     // MARK: Window size
@@ -373,7 +382,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
     /// top-left corner (DocumentWindowController.m:860-882).
     func windowWillUseStandardFrame(_ window: NSWindow, defaultFrame newFrame: NSRect) -> NSRect {
         guard hasMultiplePages, let textDocument else { return newFrame }
-        let paper = textDocument.printInfo.paperSize
+        let paper = textDocument.pageLayout.paperSize
         let scrollSize = NSScrollView.frameSize(forContentSize: paper,
                                                 horizontalScrollerClass: scrollView.hasHorizontalScroller ? NSScroller.self : nil,
                                                 verticalScrollerClass: scrollView.hasVerticalScroller ? NSScroller.self : nil,

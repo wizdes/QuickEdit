@@ -9,7 +9,7 @@ final class M35ReviewUITests: QuickEditUITestCase {
         let url = try fixtureFolder("encodings").appendingPathComponent("cancel.txt")
         launch(opening: url.path)
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
-        app.typeKey("s", modifierFlags: [.command, .shift, .option]) // Save As…
+        safePress("s", [.command, .shift, .option]) // Save As…
         let sheet = savePanel()
         let popUp = sheet.popUpButtons["saveEncoding"]
         XCTAssertTrue(popUp.waitForExistence(timeout: 5), "no encoding pop-up")
@@ -19,9 +19,9 @@ final class M35ReviewUITests: QuickEditUITestCase {
         item.click()
         sheet.buttons["Cancel"].click()
         XCTAssertTrue(sheet.waitForNonExistence(timeout: 10), "the Save panel did not close")
-        app.typeKey(.downArrow, modifierFlags: .command)
-        app.typeText("x")
-        app.typeKey("s", modifierFlags: .command)
+        safePress(.downArrow, .command)
+        safeType("x")
+        safePress("s", .command)
         waitForBytes(url, Array("abc\nx".utf8))
     }
 }
