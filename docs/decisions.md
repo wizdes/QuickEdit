@@ -4,6 +4,7 @@ Critical questions go to Astra and Fable. The option with the most votes wins; r
 
 ## User decisions
 
+- U11 (2026-10-25, user): run as few tests as possible until the very end. Builders and fixes run only the unit tests for what they change. One full `./build.sh test`, one `./build.sh speed` and one notarized DMG come at the end of M10, covering M9 and M10 together; there is no separate M9 release run.
 - U10 (2026-10-25, root under U9): `PrintTests.testTenMegabyteExportInWrapToPageStaysUnderTwiceTheText` checks its 2x memory limit only in the optimized speed run, like its Wrap to Window sister. Debug values: +16 and +19 MB with the sandbox off, +52 MB with it on (limit 40 MB). The release speed run decides whether the sandbox breaks the real limit.
 - U9 (2026-10-25, user): for major changes and test changes, do not wait on the user; take root's recommendation, record it here, and continue.
 - U8 (2026-10-25): the accessibility audit keeps its two skips (contrast, which other apps' floating windows made flaky, and AppKit's element-less "Parent/Child mismatch" from the shared text editor). In their place, a unit test checks text contrast at 4.5:1 or better, light and dark, in every window the audit covers: the document window, every Settings tab and Select Line. Done-test 1 counts as met with that note.
