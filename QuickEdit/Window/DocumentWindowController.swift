@@ -73,6 +73,9 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
+        // A file dropped on the title bar (or anywhere outside the text)
+        // opens it (P72); the text view takes its own drops.
+        window.registerForDraggedTypes([.fileURL])
         Signposts.markOnce(.firstWindowCreated)
 
         document.textStorage.addLayoutManager(layoutManager)
@@ -262,6 +265,15 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
     /// it, so Save As, Save To and Duplicate are off (M8 review row 29).
     static let noCopyTitleNote = "; Save As unavailable on this disk"
 
+    /// The title bar's file icon gets a spoken name (M9 done-test 1: the
+    /// audit flags AppKit's unnamed icon).
+    override func synchronizeWindowTitleWithDocumentName() {
+        super.synchronizeWindowTitleWithDocumentName()
+        if let name = document?.displayName {
+            window?.standardWindowButton(.documentIconButton)?.setAccessibilityLabel("File icon of \(name)")
+        }
+    }
+
     override func windowTitle(forDocumentDisplayName displayName: String) -> String {
         guard let textDocument, textDocument.isLargeFile || textDocument.isTooLargeToEdit else { return displayName }
         if textDocument.isTooLargeToEdit {
@@ -286,6 +298,8 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
         if let first = layoutManager.textContainers.first?.textView {
             textView.defaultParagraphStyle = first.defaultParagraphStyle
             textView.typingAttributes = first.typingAttributes
+            // Writing Tools as on the first page (off for a read-only large file).
+            TextViewFactory.setWritingTools(on: first.writingToolsBehavior != .none, textView)
         }
         pagesView.addSubview(textView)
         if inFront {
@@ -797,14 +811,21 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
     func updateEditable() {
         let editable = !(textDocument?.preventsEditing ?? false) && !(textDocument?.isTooLargeToEdit ?? false)
             && !isReloading && !(textDocument?.isReloading ?? false)
+        let tooLarge = textDocument?.isTooLargeToEdit ?? false
         for view in textViews {
             view.isEditable = editable
             view.isSelectable = !isReloading
+            // No Writing Tools on a file too large to edit (P73).
+            TextViewFactory.setWritingTools(on: !tooLarge, view)
         }
     }
 
     /// A large-file reload has detached this window's layout manager.
     private(set) var isReloading = false
+
+    /// The files of the drag over the window that QuickEdit opens, worked
+    /// out once when the drag enters (M9 review row 11); nil between drags.
+    private(set) var draggedOpenableURLs: [URL]?
 
     func beginReload() {
         isReloading = true
@@ -839,5 +860,57 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
         if window?.firstResponder === textView {
             LaunchStamp.firstWindowReady()
         }
+    }
+}
+
+// MARK: Files dropped on the window (P72)
+
+/// NSWindow sends the dragging-destination calls to its delegate. Only
+/// files QuickEdit can open are taken; each opens in its own window, as a
+/// file dropped on the Dock icon does.
+extension DocumentWindowController: NSDraggingDestination {
+    /// The dragged files that QuickEdit opens: plain-text types it reads,
+    /// no folders.
+    static func openableFileURLs(on pasteboard: NSPasteboard) -> [URL] {
+        let urls = pasteboard.readObjects(forClasses: [NSURL.self],
+                                          options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        let controller = NSDocumentController.shared
+        return urls.filter { url in
+            guard let type = try? controller.typeForContents(of: url) else { return false }
+            return controller.documentClass(forType: type) != nil
+        }
+    }
+
+    /// Reads each dragged file's type once per drag; draggingUpdated, sent
+    /// on every mouse move, reuses the answer.
+    func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        let urls = Self.openableFileURLs(on: sender.draggingPasteboard)
+        draggedOpenableURLs = urls
+        return urls.isEmpty ? [] : .copy
+    }
+
+    func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        guard let urls = draggedOpenableURLs else { return draggingEntered(sender) }
+        return urls.isEmpty ? [] : .copy
+    }
+
+    func draggingExited(_ sender: (any NSDraggingInfo)?) {
+        draggedOpenableURLs = nil
+    }
+
+    func draggingEnded(_ sender: any NSDraggingInfo) {
+        draggedOpenableURLs = nil
+    }
+
+    func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        let urls = draggedOpenableURLs ?? Self.openableFileURLs(on: sender.draggingPasteboard)
+        draggedOpenableURLs = nil
+        guard !urls.isEmpty else { return false }
+        for url in urls {
+            NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { _, _, error in
+                if let error { NSApp.presentError(error) }
+            }
+        }
+        return true
     }
 }

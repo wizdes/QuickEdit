@@ -77,7 +77,7 @@ enum TextViewFactory {
         let container = NSTextContainer(size: NSSize(width: size.width, height: CGFloat.greatestFiniteMagnitude))
         container.widthTracksTextView = true
         container.heightTracksTextView = false
-        let textView = NSTextView(frame: NSRect(origin: .zero, size: size), textContainer: container)
+        let textView = PlainTextView(frame: NSRect(origin: .zero, size: size), textContainer: container)
         textView.minSize = NSSize(width: 0, height: size.height)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.isVerticallyResizable = true
@@ -94,7 +94,7 @@ enum TextViewFactory {
         let container = NSTextContainer(size: frame.size)
         container.widthTracksTextView = true
         container.heightTracksTextView = true
-        let textView = NSTextView(frame: frame, textContainer: container)
+        let textView = PlainTextView(frame: frame, textContainer: container)
         textView.isHorizontallyResizable = false
         textView.isVerticallyResizable = false
         // Draw only inside the page's text area, so the frame line around it shows.
@@ -115,6 +115,7 @@ enum TextViewFactory {
         textView.usesFindBar = true
         textView.isIncrementalSearchingEnabled = true
         textView.isAutomaticLinkDetectionEnabled = false
+        setWritingTools(on: true, textView)
 
         // Spelling and substitutions from Defaults (reference/apple/DocumentWindowController.m:187-198).
         textView.isContinuousSpellCheckingEnabled = Defaults.bool(.checkSpellingWhileTyping)
@@ -125,6 +126,17 @@ enum TextViewFactory {
         textView.isAutomaticDashSubstitutionEnabled = Defaults.bool(.smartDashes)
         textView.isAutomaticDataDetectionEnabled = Defaults.bool(.dataDetectors)
         textView.isAutomaticTextReplacementEnabled = Defaults.bool(.textReplacement)
+    }
+
+    /// Writing Tools (P73): on, with plain-text results only, so a rewrite
+    /// never brings in fonts, lists or tables. Off for a file too large to
+    /// edit (M8, V3). Drags in and out of the view are plain text already:
+    /// a plain view (`isRichText = false`, `importsGraphics = false`) reads
+    /// and writes only strings, and a dropped file becomes its path.
+    @MainActor
+    static func setWritingTools(on: Bool, _ textView: NSTextView) {
+        textView.writingToolsBehavior = on ? .default : .none
+        textView.allowedWritingToolsResultOptions = [.plainText]
     }
 
     /// Large-file mode (M8 n2): every check that works on the text while
@@ -176,5 +188,33 @@ enum TextViewFactory {
         let attributes = plainTextAttributes()
         textView.defaultParagraphStyle = attributes[.paragraphStyle] as? NSParagraphStyle
         textView.typingAttributes = attributes
+    }
+}
+
+/// QuickEdit's text view: AppKit's plain NSTextView, except that files
+/// dropped or pasted into the text insert their paths, one per line, as
+/// TextEdit's plain mode does (P72). AppKit's own plain view inserts a
+/// "file://" URL instead.
+final class PlainTextView: NSTextView {
+    /// The file URLs on `pasteboard`, if any.
+    static func fileURLs(on pasteboard: NSPasteboard) -> [URL] {
+        pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+    }
+
+    /// The text a file drop inserts.
+    static func pathText(for urls: [URL]) -> String {
+        urls.map(\.path).joined(separator: "\n")
+    }
+
+    override func readSelection(from pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
+        let plain: Set<NSPasteboard.PasteboardType> = [.string, NSPasteboard.PasteboardType("NSStringPboardType")]
+        let urls = plain.contains(type) ? [] : Self.fileURLs(on: pboard)
+        guard !urls.isEmpty else { return super.readSelection(from: pboard, type: type) }
+        let text = Self.pathText(for: urls)
+        let range = rangeForUserTextChange
+        guard range.location != NSNotFound, shouldChangeText(in: range, replacementString: text) else { return false }
+        replaceCharacters(in: range, with: text)
+        didChangeText()
+        return true
     }
 }

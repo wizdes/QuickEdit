@@ -42,6 +42,7 @@ else
     fail "dist --skip-tests last line is: $last (exit $status)"
 fi
 [ ! -e "$ROOT/builds/QuickEdit-M99.zip" ] || fail "a zip was made"
+[ ! -e "$ROOT/builds/QuickEdit-M99.dmg" ] || fail "a DMG was made"
 
 # 3. `unit` and `test` run the shell tests (M2 review row 7) and fail when one
 #    fails, before any Xcode work. QE_SHELL_TESTS_DIR points them at a folder
@@ -67,8 +68,29 @@ done
 #    when xcodebuild fails. Fake xcodegen and xcodebuild record what ran.
 mkdir -p "$WORK/speed-bin"
 printf '#!/bin/bash\nexit 0\n' >"$WORK/speed-bin/xcodegen"
+# The run makes the Debug app's container first when this Mac has none
+# (build.sh ensure_debug_container): the fake "build" makes an app whose
+# start makes the stand-in container, as macOS does at a first launch.
+# The stand-in (QE_TEST_DEBUG_CONTAINER) is used both ways: present, and
+# missing (sandbox review B: the speed check failed on a Mac with no
+# container, because the fake failed the extra build).
 cat >"$WORK/speed-bin/xcodebuild" <<FAKE
 #!/bin/bash
+if [ "\${@: -1}" = build ]; then
+    echo build >>"$WORK/speed-calls"
+    prev=""
+    for a in "\$@"; do
+        if [ "\$prev" = "-derivedDataPath" ]; then
+            app="\$a/Build/Products/Debug/QuickEdit.app/Contents/MacOS"
+            mkdir -p "\$app"
+            printf '#!/bin/bash\nmkdir -p "%s/tmp"\nsleep 5\n' "\$QE_TEST_DEBUG_CONTAINER" >"\$app/QuickEdit"
+            chmod +x "\$app/QuickEdit"
+        fi
+        prev="\$a"
+    done
+    exit 0
+fi
+echo test >>"$WORK/speed-calls"
 printf '%s\n' "\$@" >"$WORK/speed-args"
 printf '%s' "\${TEST_RUNNER_QE_BIG_FILE_TESTS:-}" >"$WORK/speed-big-files"
 prev=""
@@ -79,10 +101,17 @@ done
 exit 1
 FAKE
 chmod +x "$WORK/speed-bin/xcodegen" "$WORK/speed-bin/xcodebuild"
-out="$(PATH="$WORK/speed-bin:$PATH" "$ROOT/build.sh" speed 2>&1)"; status=$?
+for container in present missing; do
+missing=""
+rm -rf "$WORK/container" "$WORK/speed-args" "$WORK/speed-derived" "$WORK/speed-calls" "$WORK/speed-big-files"
+[ "$container" = present ] && mkdir -p "$WORK/container/tmp"
+out="$(QE_TEST_DEBUG_CONTAINER="$WORK/container" PATH="$WORK/speed-bin:$PATH" "$ROOT/build.sh" speed 2>&1)"; status=$?
+calls="$(tr '\n' ' ' <"$WORK/speed-calls" 2>/dev/null)"
+want_calls="test "
+[ "$container" = missing ] && want_calls="build test "
+[ "$calls" = "$want_calls" ] || missing+=" calls '$calls' (want '$want_calls')"
 args="$(cat "$WORK/speed-args" 2>/dev/null)"
 derived="$(cat "$WORK/speed-derived" 2>/dev/null)"
-missing=""
 for want in "-configuration" "Debug" "SWIFT_OPTIMIZATION_LEVEL=-O" "SWIFT_COMPILATION_MODE=wholemodule" \
     "CODE_SIGN_IDENTITY=-" "ENABLE_HARDENED_RUNTIME=NO" \
     "-only-testing:QuickEditTests/LinePanelTests/testSelectLineOneMillionIn100MB" \
@@ -103,10 +132,11 @@ done
 [ "$(cat "$WORK/speed-big-files" 2>/dev/null)" = "1" ] || missing+=" TEST_RUNNER_QE_BIG_FILE_TESTS=1"
 if [ "$status" -ne 0 ] && [ -z "$missing" ] && [ -n "$derived" ] && [ "$derived" != "$ROOT/build/DerivedData" ] \
     && [ ! -e "$derived" ]; then
-    pass "./build.sh speed runs the speed tests optimized in its own derived data and removes it"
+    pass "./build.sh speed (container $container) runs the speed tests optimized in its own derived data and removes it"
 else
-    fail "./build.sh speed (exit $status, missing args:${missing:-none}, derived: ${derived:-none}, left behind: $([ -n "$derived" ] && [ -e "$derived" ] && echo yes || echo no)): $(tail -2 <<<"$out")"
+    fail "./build.sh speed, container $container (exit $status, missing args:${missing:-none}, derived: ${derived:-none}, left behind: $([ -n "$derived" ] && [ -e "$derived" ] && echo yes || echo no)): $(tail -2 <<<"$out")"
 fi
+done
 
 # 5. `uicheck` (M6 review row 11): any error inside the check means NOT
 #    possible and a non-zero exit. (a) TMPDIR cannot be written, so bash

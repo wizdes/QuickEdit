@@ -2,6 +2,21 @@
 
 Critical questions go to Astra and Fable. The option with the most votes wins; root breaks a tie. Small choices are root's safe default and appear under "Choices to check".
 
+## User decisions
+
+- U13 (2026-10-25, user): skip the speed run at the release. The U10 PDF memory limit and the large-file speed limits are unchecked with the sandbox on.
+- U12 (2026-10-25, user): skip the M10 review; root checks the builder's work and goes straight to the final run.
+- U11 (2026-10-25, user): run as few tests as possible until the very end. Builders and fixes run only the unit tests for what they change. One full `./build.sh test`, one `./build.sh speed` and one notarized DMG come at the end of M10, covering M9 and M10 together; there is no separate M9 release run.
+- U10 (2026-10-25, root under U9): `PrintTests.testTenMegabyteExportInWrapToPageStaysUnderTwiceTheText` checks its 2x memory limit only in the optimized speed run, like its Wrap to Window sister. Debug values: +16 and +19 MB with the sandbox off, +52 MB with it on (limit 40 MB). The release speed run decides whether the sandbox breaks the real limit.
+- U9 (2026-10-25, user): for major changes and test changes, do not wait on the user; take root's recommendation, record it here, and continue.
+- U8 (2026-10-25): the accessibility audit keeps its two skips (contrast, which other apps' floating windows made flaky, and AppKit's element-less "Parent/Child mismatch" from the shared text editor). In their place, a unit test checks text contrast at 4.5:1 or better, light and dark, in every window the audit covers: the document window, every Settings tab and Select Line. Done-test 1 counts as met with that note.
+- Quick Look test (2026-10-25, user OK): it asks Quick Look through QLThumbnailGenerator instead of `qlmanage -t`, which cannot start inside the sandbox.
+- U7 (2026-10-25): two existing tests updated for planned M9 changes: SettingsTests expects 3 tabs (adds Keyboard); M6ReviewFixTests expects 13 Tab stops (adds Paper size).
+- U6 (2026-10-25): `./build.sh quick` (under 10 minutes: lint, unit tests but typing speed, 9 critical UI tests and the M9 UI test classes) is the check for each change. The full `./build.sh test` (about 25 minutes) runs only for a release.
+- U5 (2026-10-25): a test already listed as flaky in POST_MVP.md that fails in a full run and passes when run again alone counts as passing (first case: `EditActionsTests.testStartAndStopSpeakingDriveTheSpeechSynthesizer` in the M9 sandbox run). Record each such retry in docs/STATE.md. Also: go on from M9 into M10 without stopping.
+- U4 (2026-10-25): the Settings > Keyboard tab is mockup A, one flat table with a header row per menu (`docs/mockups/M9-keyboard.html`). This overrides vote V4 (B). Kept from the V4 changes because they fit A: the clash message stays on screen under the table and VoiceOver announces it; Edit's submenus are one level; recording and per-row reset work from the keyboard with spoken labels naming the command; the button is "Restore Keyboard Defaults". Not taken: search and folding groups (A has neither).
+- U3 (2026-10-25): skip AppleScript and QuickEdit's own Services in M9. The Services menu that macOS adds by itself stays.
+
 ## Votes
 
 ### V1 (2026-10-23): which text engine?
@@ -36,6 +51,12 @@ Options: A, full editing at any size, fix the open costs; B, A's fixes plus a si
 - Fable: B. Opening can be fixed, but editing, undo and save each copy about 1 GB more on an 8 GiB Mac; C does worse than TextEdit, which opens the file.
 - Astra: B. Both limits are missed; remove the UTF-8 copy first; pick the limit from measurements (512 MB is a starting point); Save As must keep the bytes.
 Result: B, 2 of 2. Read-only alone does not pass done-test 4; the open path must still meet both limits.
+
+### V4 (2026-10-25): layout of the Settings > Keyboard tab (U2)?
+Options (mockups: three rendered windows, 440 pt wide): A, one flat table at 11 pt with a header row per menu; B, a search field over an outline with one group per menu, 13 pt, 24 pt rows; C, a menu pop-up that shows one menu's commands, 32 pt rows with key caps.
+- Fable: B. Search by name or by key reaches any of 59 commands fastest; NSOutlineView plus NSSearchField is stock AppKit and works with VoiceOver; C's key caps are custom drawing and the riskiest build.
+- Astra: B. Search does not need the menu name; 13 pt and 24 pt rows fit 440 pt; more work than A, worth it for 59 commands.
+Result: B, 2 of 2, then overridden by the user (U4: A). Changes both or one asked for, all taken: no popover, the clash message stays on screen under the list and VoiceOver announces it without moving focus (both); groups start expanded and search shows matches flat (Fable); Edit's submenus become one level, as "Find > Find..." rows (Fable); search also matches typed key names such as "cmd+shift+p" (Astra); recording and per-row reset work from the keyboard with spoken labels naming the command (Astra); the button is "Restore Keyboard Defaults" (Astra).
 
 ## Choices to check
 - Reference build: the Apple copy (version 309) is the base, not zadr (285), because it is newer and has autosave, versions and Base.lproj. zadr is kept for its ARC changes.

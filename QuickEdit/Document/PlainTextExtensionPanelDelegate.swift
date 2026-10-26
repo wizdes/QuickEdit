@@ -39,6 +39,13 @@ final class PlainTextExtensionPanelDelegate: NSObject, NSOpenSavePanelDelegate {
         guard okFlag, let panel = sender as? NSSavePanel else { return filename }
         // The checkbox on means plain text is an allowed type
         // (TextDocument.applyExtensionChoice); off means no types.
-        return Self.filename(filename, addsTxt: !panel.allowedContentTypes.isEmpty)
+        let addsTxt = !panel.allowedContentTypes.isEmpty
+        let name = Self.filename(filename, addsTxt: addsTxt)
+        // M9: the sandboxed Save panel runs in another process and ignores
+        // the name returned here (measured 2026-10-25: "plain" saved as
+        // "plain"). With other types off for this one confirm, the panel adds
+        // ".txt" itself. A typed extension such as "x.md" keeps other types on.
+        if addsTxt { panel.allowsOtherFileTypes = name == filename }
+        return name
     }
 }

@@ -1017,7 +1017,12 @@ final class PrintTests: XCTestCase {
                      run.seconds * 1000, run.peakMB, Double(document.textStorage.length * 2) / 1_048_576,
                      controller.numberOfPages, pagesMB, _isDebugAssertConfiguration() ? "false" : "true"))
         XCTAssertEqual(run.results, [true])
-        assertUnderTwiceTheText(run.peakMB, document)
+        // Checked only in the optimized speed run, like the Wrap to Window
+        // export above (user decision U10, 2026-10-25): in a sandboxed Debug
+        // run the peak was +52 MB against +16 to +19 MB unsandboxed.
+        if !_isDebugAssertConfiguration() {
+            assertUnderTwiceTheText(run.peakMB, document)
+        }
     }
 
     /// M8 n6 (review row 7): the export's peak memory above its start
@@ -1217,8 +1222,7 @@ final class PrintTests: XCTestCase {
         image.unlockFocus()
         let tiff = try XCTUnwrap(image.tiffRepresentation)
         let png = try XCTUnwrap(NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]))
-        let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("build/shots", isDirectory: true)
+        let folder = TestShots.folder
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let url = folder.appendingPathComponent("m8-pdf-progress-sheet.png")
         try png.write(to: url)

@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keyboard Tab Mockups</title>
+<meta name="description" content="Three rendered mockups of the QuickEdit Settings Keyboard tab, drawn at true point size.">
+<style>
+  /* Page colors. The mockups themselves always stay in light mode. */
+  :root {
+    --page-bg: #e9e7e3;
+    --page-bg-2: #dcd9d3;
+    --ink: #1d1d1f;
+    --ink-2: #55524c;
+    --rule: #c9c5bd;
+    --good: #1f7a3a;
+    --bad: #a3361f;
+    --chip: #ffffffb3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --page-bg: #1c1c1e;
+      --page-bg-2: #26262a;
+      --ink: #f2f2f2;
+      --ink-2: #b4b0a8;
+      --rule: #3a3a3e;
+      --good: #6fcf8a;
+      --bad: #f08a70;
+      --chip: #ffffff14;
+    }
+  }
+  :root[data-theme="dark"] {
+    --page-bg: #1c1c1e;
+    --page-bg-2: #26262a;
+    --ink: #f2f2f2;
+    --ink-2: #b4b0a8;
+    --rule: #3a3a3e;
+    --good: #6fcf8a;
+    --bad: #f08a70;
+    --chip: #ffffff14;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: radial-gradient(120% 80% at 50% 0%, var(--page-bg) 0%, var(--page-bg-2) 100%) no-repeat, var(--page-bg-2);
+    min-height: 100vh;
+    color: var(--ink);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+    overflow-x: hidden;
+  }
+  header.page { max-width: 1420px; margin: 0 auto; padding: 40px 16px 8px; }
+  header.page h1 { font-size: 28px; line-height: 1.15; margin: 0 0 10px; letter-spacing: -0.01em; }
+  header.page p { margin: 0 0 8px; max-width: 760px; color: var(--ink-2); }
+  header.page kbd { font: 13px -apple-system, sans-serif; background: var(--chip); border: 1px solid var(--rule); border-radius: 5px; padding: 0 5px; }
+  .stage { max-width: 1420px; margin: 0 auto; padding: 20px 16px 60px; display: flex; flex-wrap: wrap; gap: 36px 28px; justify-content: center; }
+  .col { width: 440px; max-width: 100%; display: flex; flex-direction: column; gap: 12px; }
+  .col .capt { min-height: 96px; }
+  .col .capt h2 { font-size: 17px; margin: 0; }
+  .col .capt p { margin: 2px 0 0; font-size: 13.5px; color: var(--ink-2); }
+  .frame-scroll { overflow-x: auto; padding: 16px 24px 56px; margin: -16px -24px -56px; }
+  .notes { list-style: none; padding: 0; margin: 4px 0 0; font-size: 13.5px; line-height: 1.45; }
+  .notes li { padding-left: 22px; position: relative; margin-bottom: 4px; }
+  .notes li::before { position: absolute; left: 0; top: 0; font-weight: 700; }
+  .notes .g::before { content: "+"; color: var(--good); }
+  .notes .b::before { content: "\2212"; color: var(--bad); }
+  .resetlink { align-self: flex-start; font: 13px -apple-system, sans-serif; color: var(--ink-2); background: none; border: 1px solid var(--rule); border-radius: 6px; padding: 2px 10px; cursor: pointer; }
+
+  /* ---------- macOS 27 window chrome (light, 1 CSS px = 1 pt) ---------- */
+  .win {
+    width: 440px; flex-shrink: 0;
+    background: #f3f3f3;
+    border-radius: 16px;
+    box-shadow: 0 0 0 0.5px rgba(0,0,0,.28), 0 1px 1px rgba(255,255,255,.6) inset, 0 24px 48px rgba(0,0,0,.24), 0 6px 14px rgba(0,0,0,.12);
+    font: 13px/16px -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    color: rgba(0,0,0,.86);
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    position: relative;
+  }
+  .titlebar { height: 32px; display: flex; align-items: center; justify-content: center; position: relative; }
+  .lights { position: absolute; left: 14px; top: 10px; display: flex; gap: 8px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 .5px rgba(0,0,0,.18); }
+  .lights i:nth-child(1) { background: #ff5f57; }
+  .lights i:nth-child(2) { background: #febc2e; }
+  .lights i:nth-child(3) { background: #d9d9d9; }
+  .titlebar b { font-weight: 600; font-size: 13px; }
+  .tabview { position: relative; margin: 4px 13px 0; padding-top: 12px; }
+  .tabstrip { position: absolute; top: 0; left: 50%; transform: translateX(-50%); display: flex; background: #e1e1e4; border-radius: 12px; padding: 2px; height: 24px; z-index: 3; box-shadow: inset 0 0 0 .5px rgba(0,0,0,.08); white-space: nowrap; }
+  .tabstrip span { padding: 0 11px; line-height: 20px; border-radius: 10px; font-size: 13px; }
+  .tabstrip span.on { background: #fff; box-shadow: 0 0 0 .5px rgba(0,0,0,.12), 0 1px 2px rgba(0,0,0,.14); }
+  .tabbox { border: 1px solid rgba(0,0,0,.09); background: rgba(0,0,0,.022); border-radius: 10px; padding: 24px 12px 12px; height: 488px; display: flex; flex-direction: column; }
+  .winbottom { padding: 12px 14px 14px; display: flex; }
+
+  .btn { display: inline-flex; align-items: center; justify-content: center; height: 24px; padding: 0 12px; border-radius: 12px; background: #fff; font: 13px -apple-system, sans-serif; color: rgba(0,0,0,.86); border: 0; box-shadow: 0 0 0 .5px rgba(0,0,0,.2), 0 1px 1.5px rgba(0,0,0,.12); cursor: default; white-space: nowrap; }
+  .btn:active { background: #e6e6e6; }
+  .btn.sm { height: 20px; font-size: 11px; padding: 0 9px; border-radius: 10px; }
+  .iconbtn { width: 18px; height: 18px; border-radius: 9px; border: 0; background: transparent; display: inline-flex; align-items: center; justify-content: center; color: rgba(0,0,0,.5); cursor: default; padding: 0; }
+  .iconbtn:hover { background: rgba(0,0,0,.08); color: rgba(0,0,0,.8); }
+  .iconbtn svg { width: 12px; height: 12px; }
+  .ring { box-shadow: 0 0 0 1px #fff, 0 0 0 3.5px rgba(0,122,255,.55) !important; }
+  .note { color: rgba(0,0,0,.52); font-size: 11px; line-height: 14px; }
+  .warn { color: #b3261e; }
+  .warn svg { vertical-align: -2px; margin-right: 3px; }
+
+  /* ---------- A: flat table, 11 pt, 18 pt rows ---------- */
+  .A .lead { font-size: 11px; line-height: 14px; margin: 0 0 6px 2px; color: rgba(0,0,0,.7); }
+  .A .tbl { flex: 1; min-height: 0; background: #fff; border-radius: 6px; box-shadow: 0 0 0 .5px rgba(0,0,0,.22); overflow-y: auto; font-size: 11px; line-height: 18px; }
+  .A .thead { position: sticky; top: 0; z-index: 2; display: flex; height: 20px; line-height: 20px; background: #fafafa; border-bottom: 1px solid rgba(0,0,0,.1); color: rgba(0,0,0,.62); font-weight: 500; }
+  .A .thead span:first-child { flex: 1; padding-left: 8px; }
+  .A .thead span:last-child { width: 132px; padding-left: 10px; border-left: 1px solid rgba(0,0,0,.08); }
+  .A .grp { height: 18px; padding-left: 8px; font-weight: 700; background: #f0f0f2; border-top: 1px solid rgba(0,0,0,.05); color: rgba(0,0,0,.85); }
+  .A .sub { height: 18px; padding-left: 18px; font-weight: 600; color: rgba(0,0,0,.5); }
+  .A .row { display: flex; height: 18px; align-items: center; }
+  .A .row:nth-of-type(even) { background: #f6f6f8; }
+  .A .row .nm { flex: 1; padding-left: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .A .row .nm.in { padding-left: 18px; }
+  .A .row .ky { width: 110px; padding: 0 6px 0 10px; color: rgba(0,0,0,.72); cursor: default; }
+  .A .row .ky:hover { color: #007aff; }
+  .A .row .rs { width: 22px; display: flex; justify-content: center; }
+  .A .row.sel { background: #0064e1 !important; color: #fff; }
+  .A .row.sel .ky { color: #fff; }
+  .A .field { display: block; height: 16px; line-height: 16px; background: #fff; color: rgba(0,0,0,.86); border-radius: 3px; padding: 0 5px; margin-left: -5px; }
+  .A .field i { color: rgba(0,0,0,.38); font-style: normal; }
+  .A .changed .nm::after { content: " (changed)"; color: rgba(0,0,0,.4); }
+  .A .row.sel.changed .nm::after { color: rgba(255,255,255,.7); }
+  .A .msg { height: 30px; display: flex; align-items: center; font-size: 11px; line-height: 14px; padding: 0 2px; }
+  .A .foot { display: flex; align-items: flex-start; gap: 10px; }
+  .A .foot .note { flex: 1; }
+
+  /* ---------- B: search + outline, 13 pt, 24 pt rows ---------- */
+  .B .search { position: relative; margin-bottom: 8px; }
+  .B .search input { width: 100%; height: 24px; border-radius: 12px; border: 0; background: #fff; box-shadow: 0 0 0 .5px rgba(0,0,0,.2), inset 0 .5px 1px rgba(0,0,0,.06); padding: 0 10px 0 26px; font: 13px -apple-system, sans-serif; color: rgba(0,0,0,.86); outline: none; }
+  .B .search input:focus { box-shadow: 0 0 0 1px #fff, 0 0 0 3.5px rgba(0,122,255,.55); }
+  .B .search svg { position: absolute; left: 9px; top: 6px; width: 12px; height: 12px; color: rgba(0,0,0,.45); }
+  .B .ol { flex: 1; min-height: 0; background: #fff; border-radius: 8px; box-shadow: 0 0 0 .5px rgba(0,0,0,.18); overflow-y: auto; padding: 4px 0; }
+  .B .r { position: relative; display: flex; align-items: center; height: 24px; padding-right: 6px; }
+  .B .r:hover { background: rgba(0,0,0,.035); }
+  .B .tw { width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; color: rgba(0,0,0,.5); flex-shrink: 0; }
+  .B .tw svg { width: 9px; height: 9px; transition: transform .15s; }
+  .B .tw.open svg { transform: rotate(90deg); }
+  .B .gname { font-weight: 600; }
+  .B .count { color: rgba(0,0,0,.4); margin-left: 6px; }
+  .B .nm { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .B .dot { width: 6px; height: 6px; border-radius: 3px; background: #007aff; margin: 0 5px 0 -11px; flex-shrink: 0; }
+  .B .ky { width: 104px; text-align: right; padding-right: 4px; cursor: default; }
+  .B .ky .tok { display: inline-block; min-width: 40px; text-align: center; padding: 0 7px; height: 20px; line-height: 20px; border-radius: 6px; color: rgba(0,0,0,.72); }
+  .B .ky:hover .tok { background: rgba(0,0,0,.06); }
+  .B .ky .tok.none { color: rgba(0,0,0,.28); }
+  .B .ky .rec { display: inline-block; width: 96px; height: 20px; line-height: 20px; border-radius: 6px; background: #fff; text-align: center; color: rgba(0,0,0,.4); }
+  .B .ky .rec.held { color: rgba(0,0,0,.86); }
+  .B .rs { width: 22px; display: flex; justify-content: center; }
+  .B .pop { position: absolute; right: 18px; top: 30px; width: 236px; background: #fff; border-radius: 12px; padding: 10px 12px; z-index: 5; box-shadow: 0 0 0 .5px rgba(0,0,0,.18), 0 10px 28px rgba(0,0,0,.2); font-size: 13px; line-height: 17px; }
+  .B .pop::before { content: ""; position: absolute; top: -6px; right: 46px; width: 12px; height: 12px; background: #fff; transform: rotate(45deg); box-shadow: -.5px -.5px 0 rgba(0,0,0,.14); }
+  .B .pop b { display: block; margin-bottom: 2px; }
+  .B .pop .note { margin-top: 6px; }
+  .B .empty { padding: 20px; text-align: center; color: rgba(0,0,0,.45); }
+  .B .foot { margin-top: 10px; display: flex; gap: 12px; align-items: flex-start; }
+  .B .foot .note { flex: 1; font-size: 11px; }
+
+  /* ---------- C: menu pop-up + one menu, 13 pt, 32 pt rows, key caps ---------- */
+  .C .top { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .C .popwrap { position: relative; }
+  .C select { appearance: none; -webkit-appearance: none; height: 24px; border-radius: 12px; border: 0; background: #fff; box-shadow: 0 0 0 .5px rgba(0,0,0,.2), 0 1px 1.5px rgba(0,0,0,.12); padding: 0 28px 0 12px; font: 13px -apple-system, sans-serif; color: rgba(0,0,0,.86); min-width: 128px; outline: none; }
+  .C select:focus { box-shadow: 0 0 0 1px #fff, 0 0 0 3.5px rgba(0,122,255,.55); }
+  .C .popwrap svg { position: absolute; right: 9px; top: 5px; width: 9px; height: 14px; pointer-events: none; color: rgba(0,0,0,.6); }
+  .C .cnt { color: rgba(0,0,0,.45); }
+  .C .lst { flex: 1; min-height: 0; background: #fff; border-radius: 10px; box-shadow: 0 0 0 .5px rgba(0,0,0,.18); overflow-y: auto; }
+  .C .sec { height: 26px; line-height: 30px; padding-left: 14px; font-size: 11px; font-weight: 600; color: rgba(0,0,0,.45); }
+  .C .r { padding: 0 10px 0 14px; border-bottom: 1px solid rgba(0,0,0,.06); }
+  .C .r:last-child { border-bottom: 0; }
+  .C .line { display: flex; align-items: center; min-height: 32px; gap: 8px; }
+  .C .nm { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .C .ky { display: flex; gap: 3px; cursor: default; padding: 3px; border-radius: 7px; }
+  .C .ky:hover { background: rgba(0,0,0,.05); }
+  .C .cap { min-width: 22px; height: 22px; padding: 0 5px; border-radius: 5px; background: #f6f6f7; box-shadow: 0 0 0 .5px rgba(0,0,0,.22), 0 1px 0 rgba(0,0,0,.18); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; color: rgba(0,0,0,.78); }
+  .C .none { color: rgba(0,0,0,.3); font-size: 12px; padding: 0 4px; line-height: 22px; }
+  .C .link { border: 0; background: none; color: #007aff; font: 12px -apple-system, sans-serif; padding: 0; cursor: default; }
+  .C .r.recording { background: #eef4ff; }
+  .C .recf { width: 132px; height: 24px; line-height: 24px; border-radius: 7px; background: #fff; text-align: center; color: rgba(0,0,0,.4); font-size: 12px; }
+  .C .recf.held { color: rgba(0,0,0,.86); font-size: 13px; }
+  .C .inl { padding: 0 0 9px; font-size: 12px; line-height: 15px; }
+  .C .inl .note { margin-top: 2px; }
+  .C .foot { margin-top: 10px; }
+  .C .foot .btns { display: flex; justify-content: space-between; margin-top: 8px; }
+</style>
+</head>
+<body>
+<header class="page">
+  <h1>QuickEdit Settings: Keyboard tab, three mockups</h1>
+  <p>Each window is drawn at true size: 1 pixel on a Retina Mac is 1 point, so the windows are 440 pt wide, like the real Settings window. All 59 commands come from <code>MainMenu.swift</code>, with their real keys.</p>
+  <p>At the start, every mockup shows the same moment: the user clicked the shortcut of <b>Save</b> to record a new one, then pressed <kbd>⌘O</kbd>. That key belongs to <b>Open…</b>, so the tab refuses it and says why. <b>Print…</b> was changed earlier to <kbd>⇧⌘P</kbd>, so it shows a reset button.</p>
+  <p>You can try them. Click a shortcut, then press keys. <kbd>Esc</kbd> cancels and <kbd>Delete</kbd> removes the shortcut. The browser keeps some keys for itself, such as <kbd>⌘W</kbd>, <kbd>⌘Q</kbd> and <kbd>⌘Tab</kbd>, so those may not reach the mockup.</p>
+</header>
+
+<main class="stage">
+  <section class="col">
+    <div class="capt"><h2>A. One flat table</h2><p>Like System Settings App Shortcuts. 11 pt small type, 18 pt rows, every command in one list with a header row per menu.</p></div>
+    <div class="frame-scroll"><div class="win A" id="winA"></div></div>
+    <ul class="notes">
+      <li class="g">Good: every command is in one list, so you can scan it for a free key, and about 22 rows fit on screen.</li>
+      <li class="g">Good: the 11 pt type matches the small controls on the two TextEdit tabs; the message line under the table never covers rows.</li>
+      <li class="b">Bad: the small rows are hard to read and click, there is no search, and 70 rows mean a lot of scrolling.</li>
+    </ul>
+    <button class="resetlink" data-reset-mock="A">Show the start state again</button>
+  </section>
+
+  <section class="col">
+    <div class="capt"><h2>B. Search plus an outline</h2><p>13 pt type, 24 pt rows. Menus are disclosure groups, and Edit has nested groups for its submenus. The clash message is a popover at the field.</p></div>
+    <div class="frame-scroll"><div class="win B" id="winB"></div></div>
+    <ul class="notes">
+      <li class="g">Good: the search finds a command by name or by key (type "⌘S" or "save"), so 59 commands stay fast to reach.</li>
+      <li class="g">Good: closed groups keep the list short, and the popover puts the message right where the user is looking.</li>
+      <li class="b">Bad: closed groups hide commands, Edit needs two clicks to reach Find, and the popover covers the rows under it.</li>
+    </ul>
+    <button class="resetlink" data-reset-mock="B">Show the start state again</button>
+  </section>
+
+  <section class="col">
+    <div class="capt"><h2>C. Pick a menu, see only its commands</h2><p>13 pt type, 32 pt rows, keys drawn as key caps. A pop-up on top picks the menu. The message opens inside the row.</p></div>
+    <div class="frame-scroll"><div class="win C" id="winC"></div></div>
+    <ul class="notes">
+      <li class="g">Good: the fewest and largest rows, so it is the easiest to read and click; key caps make each key clear.</li>
+      <li class="g">Good: the message stays inside the row being changed, and a button opens the macOS keyboard settings.</li>
+      <li class="b">Bad: you must know which menu holds a command, you cannot see free keys across menus, and Edit is still 31 rows.</li>
+    </ul>
+    <button class="resetlink" data-reset-mock="C">Show the start state again</button>
+  </section>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---------- Data: every command QuickEdit builds in MainMenu.swift ----------
+  // Keys are stored as "mods+key", mods in the order ctrl, opt, shift, cmd.
+  var RAW = [
+    ["QuickEdit", null, [["About QuickEdit", ""], ["Settings…", "cmd+,"], ["Hide QuickEdit", "cmd+h"], ["Hide Others", "opt+cmd+h"], ["Show All", ""], ["Quit QuickEdit", "cmd+q"]]],
+    ["File", null, [["New", "cmd+n"], ["Open…", "cmd+o"], ["Open Recent › Clear Menu", ""], ["Close", "cmd+w"], ["Save", "cmd+s"], ["Duplicate", "shift+cmd+s"], ["Save As…", "opt+shift+cmd+s"], ["Rename…", ""], ["Move To…", ""], ["Save All", ""], ["Revert to Saved", ""], ["Export as PDF…", ""], ["Print…", "cmd+p"]]],
+    ["Edit", null, [["Undo", "cmd+z"], ["Redo", "shift+cmd+z"], ["Cut", "cmd+x"], ["Copy", "cmd+c"], ["Paste", "cmd+v"], ["Delete", ""], ["Complete", "opt+esc"], ["Select All", "cmd+a"]]],
+    ["Edit", "Find", [["Find…", "cmd+f"], ["Find and Replace…", "opt+cmd+f"], ["Find Next", "cmd+g"], ["Find Previous", "shift+cmd+g"], ["Use Selection for Find", "cmd+e"], ["Jump to Selection", "cmd+j"], ["Select Line...", "cmd+l"]]],
+    ["Edit", "Spelling and Grammar", [["Show Spelling and Grammar", "shift+cmd+;"], ["Check Document Now", "cmd+;"], ["Check Spelling While Typing", ""], ["Check Grammar With Spelling", ""], ["Correct Spelling Automatically", ""]]],
+    ["Edit", "Substitutions", [["Show Substitutions", ""], ["Smart Copy/Paste", ""], ["Smart Quotes", ""], ["Smart Dashes", ""], ["Data Detectors", ""], ["Text Replacement", ""]]],
+    ["Edit", "Transformations", [["Make Upper Case", ""], ["Make Lower Case", ""], ["Capitalize", ""]]],
+    ["Edit", "Speech", [["Start Speaking", ""], ["Stop Speaking", ""]]],
+    ["Format", null, [["Prevent Editing", ""], ["Wrap to Page", "shift+cmd+w"]]],
+    ["View", null, [["Actual Size", "cmd+0"], ["Zoom In", "shift+cmd+."], ["Zoom Out", "shift+cmd+,"], ["Enter Full Screen", "ctrl+cmd+f"]]],
+    ["Window", null, [["Minimize", "cmd+m"], ["Zoom", ""], ["Bring All to Front", ""]]]
+  ];
+  var CMDS = [], BYID = {}, MENUS = [];
+  RAW.forEach(function (g) {
+    if (MENUS.indexOf(g[0]) < 0) MENUS.push(g[0]);
+    g[2].forEach(function (it) {
+      var c = { id: (g[0] + "/" + (g[1] || "") + "/" + it[0]), menu: g[0], sub: g[1], name: it[0], def: it[1] };
+      CMDS.push(c); BYID[c.id] = c;
+    });
+  });
+  var SAVE = "File//Save", PRINT = "File//Print…", OPEN = "File//Open…";
+  var SYSTEM = { "cmd+tab": 1, "cmd+space": 1, "opt+cmd+esc": 1 };
+
+  // ---------- Key names and glyphs ----------
+  var SHIFTED = { ";": ":", ".": ">", ",": "<", "/": "?" };
+  var LABEL = { esc: "⎋", tab: "⇥", space: "Space", "delete": "⌫", fwddelete: "⌦", "return": "↩", left: "←", right: "→", up: "↑", down: "↓" };
+  function parts(combo) {
+    if (!combo) return [];
+    var p = combo.split("+"), key = p.pop(), m = {};
+    p.forEach(function (x) { m[x] = 1; });
+    var out = [];
+    var useShifted = m.shift && SHIFTED[key];
+    if (m.ctrl) out.push("⌃");
+    if (m.opt) out.push("⌥");
+    if (m.shift && !useShifted) out.push("⇧");
+    if (m.cmd) out.push("⌘");
+    var k = useShifted ? SHIFTED[key] : (LABEL[key] || (/^f\d+$/.test(key) ? key.toUpperCase() : key.toUpperCase()));
+    out.push(k);
+    return out;
+  }
+  function show(combo) { return parts(combo).join(""); }
+  function heldMods(e) {
+    return (e.ctrlKey ? "⌃" : "") + (e.altKey ? "⌥" : "") + (e.shiftKey ? "⇧" : "") + (e.metaKey ? "⌘" : "");
+  }
+  var CODEKEY = { Period: ".", Comma: ",", Semicolon: ";", Quote: "'", Slash: "/", Backslash: "\\", BracketLeft: "[", BracketRight: "]", Minus: "-", Equal: "=", Backquote: "`", Escape: "esc", Tab: "tab", Space: "space", Backspace: "delete", Delete: "fwddelete", Enter: "return", ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
+  function keyOf(e) {
+    var c = e.code || "", m;
+    if ((m = /^Key([A-Z])$/.exec(c))) return m[1].toLowerCase();
+    if ((m = /^Digit(\d)$/.exec(c))) return m[1];
+    if ((m = /^F(\d{1,2})$/.exec(c))) return "f" + m[1];
+    return CODEKEY[c] || null;
+  }
+  function comboOf(e, key) {
+    var mods = [];
+    if (e.ctrlKey) mods.push("ctrl");
+    if (e.altKey) mods.push("opt");
+    if (e.shiftKey) mods.push("shift");
+    if (e.metaKey) mods.push("cmd");
+    return mods.concat([key]).join("+");
+  }
+  function where(c) { return c.sub ? c.menu + " > " + c.sub : c.menu; }
+  function shortName(c) { return c.name.replace("Open Recent › ", ""); }
+
+  // ---------- Small icons ----------
+  var IC = {
+    reset: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 7.6A5 5 0 1 0 5 3.9"/><path d="M5.4 1.2v3.2H2.2"/></svg>',
+    warn: '<svg width="12" height="12" viewBox="0 0 16 16"><path d="M8 1.3 15.2 14H.8z" fill="#f4b400" stroke="#c98a00" stroke-width=".8" stroke-linejoin="round"/><path d="M8 5.6v4.2" stroke="#3a2a00" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="11.9" r=".95" fill="#3a2a00"/></svg>',
+    info: '<svg width="12" height="12" viewBox="0 0 16 16" style="vertical-align:-2px;margin-right:3px"><circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 7v4.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="4.6" r=".9" fill="currentColor"/></svg>',
+    tri: '<svg viewBox="0 0 10 10"><path d="M3 1.5 7.5 5 3 8.5z" fill="currentColor"/></svg>',
+    mag: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="6.8" cy="6.8" r="4.8"/><path d="m10.4 10.4 4 4"/></svg>',
+    updown: '<svg viewBox="0 0 9 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m1.5 5 3-3 3 3M1.5 9l3 3 3-3"/></svg>'
+  };
+
+  var NOTE_TEXT = "Shortcuts set for QuickEdit in System Settings > Keyboard > Keyboard Shortcuts > App Shortcuts win over the ones here.";
+  var HINT = "Press Esc to cancel, or Delete to remove the shortcut.";
+  function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+
+  // ---------- One state object per mockup ----------
+  var active = null;
+  function Mock(key, el, build, render) {
+    this.key = key; this.el = el; this.build = build; this.renderFn = render;
+    this.reset();
+  }
+  Mock.prototype.reset = function () {
+    var cur = {};
+    CMDS.forEach(function (c) { cur[c.id] = c.def; });
+    cur[PRINT] = "shift+cmd+p";
+    this.cur = cur;
+    this.recording = SAVE;
+    this.held = "";
+    this.msg = { kind: "clash", combo: "cmd+o", other: OPEN };
+    this.open = { "File": true };
+    this.query = "";
+    this.menu = "File";
+    this.el.innerHTML = this.build(this);
+    this.render();
+    var self = this;
+    var s = this.el.querySelector("input[type=search]");
+    if (s) s.addEventListener("input", function () { self.query = s.value.trim(); self.render(); });
+    var sel = this.el.querySelector("select");
+    if (sel) sel.addEventListener("change", function () { self.menu = sel.value; self.render(); });
+  };
+  Mock.prototype.render = function () { this.renderFn(this); };
+  Mock.prototype.changed = function (id) { return this.cur[id] !== BYID[id].def; };
+  Mock.prototype.msgHTML = function (withHint) {
+    var m = this.msg;
+    if (!m) return withHint ? '<span class="note">' + HINT + '</span>' : "";
+    var t;
+    if (m.kind === "clash") {
+      var o = BYID[m.other];
+      t = "<b>" + esc(show(m.combo)) + "</b> is already used by “" + esc(shortName(o)) + "” in the " + esc(where(o)) + " menu.";
+    } else if (m.kind === "system") {
+      t = "<b>" + esc(show(m.combo)) + "</b> is kept by macOS.";
+    } else {
+      t = "A shortcut needs ⌘ or ⌃, unless it is a function key.";
+    }
+    return '<span class="warn">' + IC.warn + t + "</span>";
+  };
+  Mock.prototype.start = function (id) {
+    if (active && active !== this && active.recording) { active.recording = null; active.held = ""; active.msg = null; active.render(); }
+    active = this; this.recording = id; this.held = ""; this.msg = null; this.render();
+  };
+  Mock.prototype.stop = function () { this.recording = null; this.held = ""; this.msg = null; this.render(); };
+  Mock.prototype.press = function (e) {
+    var key = keyOf(e);
+    if (!key) { this.held = heldMods(e); this.render(); return; }
+    var combo = comboOf(e, key);
+    var bare = !(e.ctrlKey || e.altKey || e.shiftKey || e.metaKey);
+    if (bare && key === "esc") { this.stop(); return; }
+    if (bare && (key === "delete" || key === "fwddelete")) { this.cur[this.recording] = ""; this.stop(); return; }
+    this.held = "";
+    if (SYSTEM[combo]) { this.msg = { kind: "system", combo: combo }; this.render(); return; }
+    if (!(e.ctrlKey || e.metaKey) && !/^f\d+$/.test(key)) { this.msg = { kind: "needmod" }; this.render(); return; }
+    var self = this, other = null;
+    CMDS.forEach(function (c) { if (c.id !== self.recording && self.cur[c.id] === combo) other = c.id; });
+    if (other) { this.msg = { kind: "clash", combo: combo, other: other }; this.render(); return; }
+    this.cur[this.recording] = combo;
+    this.stop();
+  };
+
+  document.addEventListener("keydown", function (e) {
+    if (!active || !active.recording) return;
+    if (e.target && e.target.matches && e.target.matches("input, select")) return;
+    e.preventDefault();
+    active.press(e);
+  });
+  document.addEventListener("keyup", function (e) {
+    if (!active || !active.recording) return;
+    var h = heldMods(e);
+    if (h !== active.held && !keyOf(e)) { active.held = h; active.render(); }
+  });
+
+  function chrome(inner, extraTabClass) {
+    return '<div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><b>Settings</b></div>' +
+      '<div class="tabview"><div class="tabstrip"><span>New Document</span><span>Open and Save</span><span class="on">Keyboard</span></div>' +
+      '<div class="tabbox ' + (extraTabClass || "") + '">' + inner + '</div></div>' +
+      '<div class="winbottom"><button class="btn">Restore All Defaults</button></div>';
+  }
+
+  // Shared click handling inside each window.
+  function wire(m) {
+    m.el.addEventListener("click", function (e) {
+      var t = e.target.closest("[data-rec],[data-reset],[data-restore],[data-toggle]");
+      if (!t) return;
+      if (t.hasAttribute("data-rec")) m.start(t.getAttribute("data-rec"));
+      else if (t.hasAttribute("data-reset")) { var id = t.getAttribute("data-reset"); m.cur[id] = BYID[id].def; if (m.recording === id) m.recording = null; m.msg = null; m.render(); }
+      else if (t.hasAttribute("data-restore")) { CMDS.forEach(function (c) { m.cur[c.id] = c.def; }); m.recording = null; m.msg = null; m.render(); }
+      else if (t.hasAttribute("data-toggle")) { var k = t.getAttribute("data-toggle"); m.open[k] = !m.open[k]; m.render(); }
+    });
+  }
+  function resetBtn(id) { return '<button class="iconbtn" title="Reset to default" aria-label="Reset to default" data-reset="' + esc(id) + '">' + IC.reset + '</button>'; }
+
+  // ---------- A ----------
+  function buildA() {
+    return chrome(
+      '<p class="lead">Click a shortcut, then press the new keys.</p>' +
+      '<div class="tbl"><div class="thead"><span>Command</span><span>Shortcut</span></div><div class="dyn"></div></div>' +
+      '<div class="msg"></div>' +
+      '<div class="foot"><span class="note">' + NOTE_TEXT + '</span><button class="btn sm" data-restore>Restore Defaults</button></div>');
+  }
+  function renderA(m) {
+    var h = "", lastMenu = null, lastSub = null;
+    CMDS.forEach(function (c) {
+      if (c.menu !== lastMenu) { h += '<div class="grp">' + esc(c.menu) + '</div>'; lastMenu = c.menu; lastSub = null; }
+      if (c.sub && c.sub !== lastSub) { h += '<div class="sub">' + esc(c.sub) + '</div>'; }
+      lastSub = c.sub;
+      var rec = m.recording === c.id, ch = m.changed(c.id);
+      var key = rec
+        ? '<span class="field ring">' + (m.held ? esc(m.held) : '<i>Type shortcut</i>') + '</span>'
+        : esc(show(m.cur[c.id]));
+      h += '<div class="row' + (rec ? " sel" : "") + (ch ? " changed" : "") + '"><span class="nm' + (c.sub ? " in" : "") + '">' + esc(c.name) + '</span>' +
+        '<span class="ky" data-rec="' + esc(c.id) + '">' + key + '</span><span class="rs">' + (ch ? resetBtn(c.id) : "") + '</span></div>';
+    });
+    m.el.querySelector(".dyn").innerHTML = h;
+    m.el.querySelector(".msg").innerHTML = m.recording ? m.msgHTML(true) : "";
+  }
+
+  // ---------- B ----------
+  function buildB() {
+    return chrome(
+      '<div class="search">' + IC.mag + '<input type="search" placeholder="Search commands or shortcuts" aria-label="Search commands or shortcuts"></div>' +
+      '<div class="ol"><div class="dyn"></div></div>' +
+      '<div class="foot"><button class="btn" data-restore>Restore Defaults</button><span class="note">' + IC.info + NOTE_TEXT + '</span></div>');
+  }
+  function renderB(m) {
+    var q = m.query.toLowerCase(), h = "";
+    function match(c) {
+      if (!q) return true;
+      return c.name.toLowerCase().indexOf(q) >= 0 || show(m.cur[c.id]).toLowerCase().indexOf(q) >= 0 ||
+        (m.cur[c.id] && m.cur[c.id].indexOf(q) >= 0);
+    }
+    function row(c, depth) {
+      var rec = m.recording === c.id, ch = m.changed(c.id), pad = 8 + depth * 16 + 16;
+      var key;
+      if (rec) key = '<span class="rec ring' + (m.held ? " held" : "") + '">' + (m.held ? esc(m.held) : "Press shortcut") + '</span>';
+      else key = m.cur[c.id] ? '<span class="tok">' + esc(show(m.cur[c.id])) + '</span>' : '<span class="tok none">none</span>';
+      var pop = "";
+      if (rec && m.msg) {
+        // Popover body: bold first line, then the reason.
+        var mm = m.msg, line1, line2;
+        if (mm.kind === "clash") { var o = BYID[mm.other]; line1 = show(mm.combo) + " is already used"; line2 = "by “" + shortName(o) + "” in the " + where(o) + " menu."; }
+        else if (mm.kind === "system") { line1 = show(mm.combo) + " is kept by macOS"; line2 = "Pick a key macOS does not use."; }
+        else { line1 = "This shortcut needs ⌘ or ⌃"; line2 = "Only function keys work on their own."; }
+        pop = '<div class="pop"><b class="warn">' + IC.warn + esc(line1) + '</b>' + esc(line2) + '<div class="note">' + HINT + '</div></div>';
+      }
+      return '<div class="r" style="padding-left:' + pad + 'px">' + (ch ? '<span class="dot" title="Changed"></span>' : "") +
+        '<span class="nm">' + esc(c.name) + '</span><span class="ky" data-rec="' + esc(c.id) + '">' + key + '</span><span class="rs">' + (ch ? resetBtn(c.id) : "") + '</span>' + pop + '</div>';
+    }
+    function group(label, key, depth, items, count) {
+      var open = q ? true : !!m.open[key];
+      var s = '<div class="r" style="padding-left:' + (8 + depth * 16) + 'px" data-toggle="' + esc(key) + '"><span class="tw' + (open ? " open" : "") + '">' + IC.tri + '</span><span class="nm"><span class="gname">' + esc(label) + '</span><span class="count">' + count + '</span></span></div>';
+      return { head: s, open: open };
+    }
+    var any = false;
+    MENUS.forEach(function (menu) {
+      var all = CMDS.filter(function (c) { return c.menu === menu; });
+      var hits = all.filter(match);
+      if (!hits.length) return;
+      any = true;
+      var g = group(menu, menu, 0, hits, q ? hits.length : all.length);
+      h += g.head;
+      if (!g.open) return;
+      var subs = [];
+      hits.forEach(function (c) { if (!c.sub) h += row(c, 0); else if (subs.indexOf(c.sub) < 0) subs.push(c.sub); });
+      subs.forEach(function (sub) {
+        var sAll = all.filter(function (c) { return c.sub === sub; });
+        var sHits = hits.filter(function (c) { return c.sub === sub; });
+        var sg = group(sub, menu + "/" + sub, 1, sHits, q ? sHits.length : sAll.length);
+        h += sg.head;
+        if (sg.open) sHits.forEach(function (c) { h += row(c, 1); });
+      });
+    });
+    if (!any) h = '<div class="empty">No command or shortcut matches “' + esc(m.query) + '”.</div>';
+    m.el.querySelector(".dyn").innerHTML = h;
+  }
+
+  // ---------- C ----------
+  function buildC() {
+    var opts = MENUS.map(function (x) { return '<option' + (x === "File" ? " selected" : "") + '>' + esc(x) + '</option>'; }).join("");
+    return chrome(
+      '<div class="top"><span>Menu:</span><span class="popwrap"><select aria-label="Menu">' + opts + '</select>' + IC.updown + '</span><span class="cnt"></span></div>' +
+      '<div class="lst"><div class="dyn"></div></div>' +
+      '<div class="foot"><div class="note">' + NOTE_TEXT + '</div><div class="btns"><button class="btn" data-restore>Restore Defaults</button><button class="btn" onclick="return false">Open Keyboard Settings…</button></div></div>');
+  }
+  function renderC(m) {
+    var list = CMDS.filter(function (c) { return c.menu === m.menu; }), h = "", lastSub = null;
+    list.forEach(function (c) {
+      if (c.sub && c.sub !== lastSub) h += '<div class="sec">' + esc(c.sub.toUpperCase()) + '</div>';
+      lastSub = c.sub;
+      var rec = m.recording === c.id, ch = m.changed(c.id), right;
+      if (rec) right = '<span class="recf ring' + (m.held ? " held" : "") + '">' + (m.held ? esc(m.held) : "Press a shortcut…") + '</span>';
+      else {
+        var p = parts(m.cur[c.id]);
+        right = '<span class="ky" data-rec="' + esc(c.id) + '">' + (p.length ? p.map(function (x) { return '<span class="cap">' + esc(x) + '</span>'; }).join("") : '<span class="none">none</span>') + '</span>';
+      }
+      h += '<div class="r' + (rec ? " recording" : "") + '"><div class="line"><span class="nm">' + esc(c.name) + '</span>' +
+        (ch && !rec ? '<button class="link" data-reset="' + esc(c.id) + '">Reset</button>' : "") + right + '</div>' +
+        (rec ? '<div class="inl">' + m.msgHTML(true) + (m.msg ? '<div class="note">' + HINT + '</div>' : "") + '</div>' : "") + '</div>';
+    });
+    m.el.querySelector(".dyn").innerHTML = h;
+    m.el.querySelector(".cnt").textContent = list.length + " commands";
+  }
+
+  var mocks = {
+    A: new Mock("A", document.getElementById("winA"), buildA, renderA),
+    B: new Mock("B", document.getElementById("winB"), buildB, renderB),
+    C: new Mock("C", document.getElementById("winC"), buildC, renderC)
+  };
+  Object.keys(mocks).forEach(function (k) { wire(mocks[k]); });
+  document.querySelectorAll("[data-reset-mock]").forEach(function (b) {
+    b.addEventListener("click", function () { var m = mocks[b.getAttribute("data-reset-mock")]; if (active === m) active = null; m.reset(); });
+  });
+})();
+</script>
+</body>
+</html>

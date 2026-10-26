@@ -14,7 +14,7 @@ settings:
     SWIFT_VERSION: "6.0"            # Swift 6 language mode
     SWIFT_STRICT_CONCURRENCY: complete
     MACOSX_DEPLOYMENT_TARGET: "27.0"
-    MARKETING_VERSION: "0.1.0"      # 0.<milestone>.0
+    MARKETING_VERSION: "1.0"        # the M10 release
     CURRENT_PROJECT_VERSION: "1"    # build.sh passes the commit count
     DEVELOPMENT_TEAM: 8Q5V8XK85Y
     CODE_SIGN_STYLE: Manual
@@ -41,9 +41,31 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         CODE_SIGN_ENTITLEMENTS: QuickEdit/Resources/QuickEdit.entitlements
         ENABLE_HARDENED_RUNTIME: YES
-        ASSETCATALOG_COMPILER_APPICON_NAME: ""
-        ENABLE_APP_SANDBOX: NO
-        ENABLE_USER_SELECTED_FILES: ""
+        # The Icon Composer file QuickEdit/Resources/QuickEdit.icon (M10 n1).
+        # actool compiles it into Assets.car, so macOS 26+ draws it full size
+        # with no gray plate (the Kelpi pattern).
+        ASSETCATALOG_COMPILER_APPICON_NAME: QuickEdit
+        ENABLE_APP_SANDBOX: YES
+        ENABLE_USER_SELECTED_FILES: readwrite
+      configs:
+        # The tests run the Debug app sandboxed. Its own bundle ID gives it its
+        # own container and settings, so test runs never touch the user's
+        # real ~/Library/Containers/dev.yili.QuickEdit or its settings.
+        # container-migration.plist names the user's real settings file, so
+        # the Debug app must never carry it: its first launch would move that
+        # file into the Debug container. The script below fails the build if
+        # it slips in anyway.
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: dev.yili.QuickEdit.debug
+          EXCLUDED_SOURCE_FILE_NAMES: container-migration.plist
+    postBuildScripts:
+      - name: Debug app has no container-migration.plist
+        basedOnDependencyAnalysis: false
+        script: |
+          if [ "$CONFIGURATION" != "Release" ] && [ -e "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/container-migration.plist" ]; then
+            echo "error: the $CONFIGURATION app must not carry container-migration.plist (it would move the user's real settings)"
+            exit 1
+          fi
 
   QuickEditTests:
     type: bundle.unit-test

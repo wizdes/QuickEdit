@@ -2,6 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- App Sandbox stays off until M9 (Doc B section 1). -->
+	<!-- M9: App Sandbox on (Doc B section 1). Exactly these two keys ship;
+	     bench/tests/sandbox-release-test.sh checks the signed Release app. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
 </dict>
 </plist>

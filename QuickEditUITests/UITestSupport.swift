@@ -4,8 +4,10 @@ import XCTest
 ///
 /// The UI test runner is sandboxed (it may read any path but write only in its
 /// own container), so `./build.sh test` makes the fixture files and folders and
-/// passes their path as TEST_RUNNER_QE_FIXTURES. The app is not sandboxed and
-/// saves into those folders; the tests only read them.
+/// passes their path as TEST_RUNNER_QE_FIXTURES. The app is sandboxed too
+/// (M9), so the fixtures live in the Debug app's own container
+/// (~/Library/Containers/dev.yili.QuickEdit.debug/Data/tmp), where it may
+/// read and save without a Save or Open panel; the tests only read them.
 @MainActor
 class QuickEditUITestCase: XCTestCase {
     var app: XCUIApplication!
@@ -84,7 +86,9 @@ class QuickEditUITestCase: XCTestCase {
     /// checkbox, go to `folder` with Cmd+Shift+G, and press Save. The name is
     /// typed BEFORE the checkbox changes, as a person does, so a checkbox that
     /// overwrites the typed name fails the test (M1 review row 3).
-    func fillSavePanel(name: String, folder: URL, addTxtExtension: Bool? = nil,
+    /// `replacing`: a file of that name is there, so press Replace on the
+    /// question the panel asks before it closes.
+    func fillSavePanel(name: String, folder: URL, addTxtExtension: Bool? = nil, replacing: Bool = false,
                        file: StaticString = #filePath, line: UInt = #line) {
         let sheet = savePanel(file: file, line: line)
         if let addTxtExtension {
@@ -109,6 +113,12 @@ class QuickEditUITestCase: XCTestCase {
         // Let the panel settle on the folder, then press Save.
         RunLoop.current.run(until: Date().addingTimeInterval(1.0))
         safePress(.return, [])
+        if replacing {
+            let replace = app.buttons["Replace"].firstMatch
+            XCTAssertTrue(replace.waitForExistence(timeout: 10), "no question before replacing \(name)",
+                          file: file, line: line)
+            replace.click()
+        }
         XCTAssertTrue(sheet.waitForNonExistence(timeout: 10), "Save panel did not close", file: file, line: line)
     }
 

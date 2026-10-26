@@ -12,9 +12,10 @@
 #                                     read-only and 512 MB editable, each with no main-thread block
 #                                     over 200 ms and a peak under 1.5 GB, and a 1 GB reload within the
 #                                     same limits: needs about 2 GB free disk)
-#   ./build.sh dist M<n> [--skip-tests]
-#                                     full tests, then Release build, zip to builds/QuickEdit-M<n>.zip,
-#                                     notarize when the keychain is open
+#   ./build.sh dist <name> [--skip-tests]
+#                                     full tests, then Release build, DMG to builds/QuickEdit-<name>.dmg
+#                                     (scripts/make-dmg.sh: the app and the DMG notarized and stapled
+#                                     when the keychain is open; never a zip)
 # Every command prints its result and exits non-zero on failure.
 set -euo pipefail
 
@@ -118,21 +119,60 @@ ui_tests_possible() {
     return 0
 }
 
+# The Debug app is sandboxed (M9) under its own bundle ID (project.yml), so
+# it may read and write only its own container and files the user picks.
+# The UI test fixtures and the unit tests' screenshots live in that
+# container's tmp folder. Never the real app's container.
+DEBUG_BUNDLE_ID="dev.yili.QuickEdit.debug"
+DEBUG_CONTAINER="$HOME/Library/Containers/$DEBUG_BUNDLE_ID/Data"
+# bench/tests/build-sh-test.sh only: a stand-in container folder, so its
+# fake xcodebuild runs work whether or not this Mac has the real one.
+if [ -n "${QE_TEST_DEBUG_CONTAINER:-}" ]; then
+    case "$QE_TEST_DEBUG_CONTAINER" in
+        */Library/Containers/*) echo "QE_TEST_DEBUG_CONTAINER must not be a real container: $QE_TEST_DEBUG_CONTAINER" >&2; exit 1 ;;
+    esac
+    DEBUG_CONTAINER="$QE_TEST_DEBUG_CONTAINER"
+fi
+
+# macOS makes an app's container at its first launch. A fresh Mac has none,
+# so build the Debug app and start it once, then stop it.
+ensure_debug_container() {
+    [ -d "$DEBUG_CONTAINER/tmp" ] && return 0
+    local log="$BUILD/debug-container.log" app="$TEST_DERIVED/Build/Products/Debug/QuickEdit.app"
+    echo "making the Debug app's container (first sandboxed run on this Mac; log: $log)"
+    xcodebuild -project "$PROJECT" -scheme QuickEdit -configuration Debug -derivedDataPath "$TEST_DERIVED" \
+        -destination 'platform=macOS,arch=arm64' CODE_SIGN_IDENTITY=- CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+        ${TEST_SETTINGS[@]+"${TEST_SETTINGS[@]}"} build >"$log" 2>&1 || die "Debug build for the container (log: $log)"
+    "$app/Contents/MacOS/QuickEdit" -ApplePersistenceIgnoreState YES -NSQuitAlwaysKeepsWindows NO >>"$log" 2>&1 &
+    local pid=$! i
+    for i in $(seq 1 100); do [ -d "$DEBUG_CONTAINER/tmp" ] && break; sleep 0.1; done
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+    [ -d "$DEBUG_CONTAINER/tmp" ] || die "the Debug app made no container at $DEBUG_CONTAINER"
+}
+
 # Files and folders the UI tests read and save into (see QuickEditUITests/UITestSupport.swift).
+# Each run gets a new folder, so nothing is deleted here.
 make_fixtures() {
     local dir="$1"
-    unlock_fixtures "$dir"
-    rm -rf "$dir"
+    [ ! -e "$dir" ] || die "fixture folder $dir already exists"
     mkdir -p "$dir"
     local name
-    for name in open-type-save new-save boundary ext-on ext-off ext-md open-panel shots \
+    for name in open-type-save new-save boundary ext-on ext-off ext-md ext-replace open-panel shots \
         transient external-clean external-edited locked close-named close-untitled \
-        rename-move rename-move/dest restore recent cascade revert encodings dark-mode; do
+        rename-move rename-move/dest restore recent cascade revert encodings dark-mode sandbox-restore; do
         mkdir -p "$dir/$name"
     done
     printf 'abc\n' >"$dir/open-type-save/hello.txt"
     printf 'start\n' >"$dir/boundary/boundary.txt"
     printf 'opened by the Open panel\n' >"$dir/open-panel/openme.txt"
+    # M9: saving "plain" with the .txt box on asks before replacing this
+    # (QuickEditUITests/SandboxUITests.swift).
+    printf 'keep me\n' >"$dir/ext-replace/plain.txt"
+    # M9: the first window of the outside-file restoration test. With saved
+    # state read, an app that last quit with no windows opens none, so the
+    # test opens this one at launch (QuickEditUITests/SandboxUITests.swift).
+    printf 'first window\n' >"$dir/sandbox-restore/start.txt"
     # M2 document life (QuickEditUITests/DocumentLifeTests.swift and friends).
     printf 'replaces the untitled window\n' >"$dir/transient/replace.txt"
     printf 'before\n' >"$dir/external-clean/outside.txt"
@@ -156,6 +196,34 @@ make_fixtures() {
     # About 1 MB of numbered lines; the restoration test selects line 13000.
     awk 'BEGIN { for (i = 0; i < 26000; i++) printf "line %d of the restoration fixture\n", i }' \
         >"$dir/restore/restore-1mb.txt"
+}
+
+# True when the test list $1 can run a UI test that opens the large outside
+# file: the full run (empty list), the whole UI target or SandboxUITests
+# class, or one of its large-file tests.
+needs_big_outside_file() {
+    local only="$1" target
+    [ -z "$only" ] && return 0
+    for target in $only; do
+        case "$target" in
+            QuickEditUITests|QuickEditUITests/SandboxUITests|QuickEditUITests/SandboxUITests/testLargeOutsideFile*) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+# Fixture and outside folders left by runs that ended over 2 hours ago (no
+# run lasts that long: QE_TEST_TIMEOUT is 20 minutes). Newer ones may belong
+# to a run in another clone, which shares the Debug app's container.
+remove_old_fixtures() {
+    local dir
+    for dir in "$DEBUG_CONTAINER/tmp/QuickEditUITestFixtures" "$BUILD/uitest-outside"; do
+        [ -d "$dir" ] || continue
+        find "$dir" -mindepth 1 -maxdepth 1 -type d -mmin +120 -print0 | while IFS= read -r -d '' old; do
+            chflags -R nouchg "$old" 2>/dev/null || true
+            rm -rf "$old" || echo "NOTE: could not remove the old fixture folder $old" >&2
+        done
+    done
 }
 
 # Locked fixtures (chflags uchg) cannot be deleted; unlock them after a run.
@@ -188,11 +256,38 @@ run_tests() {
         for target in $only; do args+=("-only-testing:$target"); done
     fi
     # The UI test runner is sandboxed: it can read any path but write only
-    # inside its own container. So the fixture files are made here, and the
-    # (unsandboxed) app saves into these folders.
-    local fixtures="$BUILD/uitest-fixtures/$label-$stamp"
+    # inside its own container. So the fixture files are made here, inside
+    # the sandboxed Debug app's container, where the app may read and write.
+    ensure_debug_container
+    remove_old_fixtures
+    local fixtures="$DEBUG_CONTAINER/tmp/QuickEditUITestFixtures/$label-$stamp"
     make_fixtures "$fixtures"
     export TEST_RUNNER_QE_FIXTURES="$fixtures"
+    # One file OUTSIDE the container, which the app may use only once it is
+    # picked in the Open panel (QuickEditUITests/SandboxUITests.swift).
+    local outside="$BUILD/uitest-outside/$label-$stamp"
+    mkdir -p "$outside"
+    printf 'outside\n' >"$outside/user.txt"
+    printf 'restored from outside\n' >"$outside/restore.txt"
+    printf 'life\n' >"$outside/life.txt"
+    printf 'caf\303\251\n' >"$outside/latin.txt"
+    printf 'before\n' >"$outside/reload.txt"
+    printf 'pdf source\n' >"$outside/pdf-source.txt"
+    printf 'not a pdf yet\n' >"$outside/existing.pdf"
+    printf 'extension\n' >"$outside/ext.txt"
+    printf 'v1\n' >"$outside/versions.txt"
+    printf 'old target\n' >"$outside/big-target.txt"
+    # Over the 50 MB large-file limit, so QuickEdit clones it (M8 V3). 55 MB,
+    # so only for runs that include a large-file UI test (sandbox review H).
+    if needs_big_outside_file "$only"; then
+        awk 'BEGIN { for (i = 0; i < 1400000; i++) printf "line %07d of the large outside file\n", i }' >"$outside/big.txt"
+    fi
+    export TEST_RUNNER_QE_OUTSIDE="$outside"
+    # Screenshots the unit tests draw (read by root): written in the
+    # container, copied to build/shots after the run.
+    local shots="$DEBUG_CONTAINER/tmp/QuickEditShots/$label-$stamp"
+    mkdir -p "$shots"
+    export TEST_RUNNER_QE_SHOTS="$shots"
     echo "xcodebuild test: $label (log: $log)"
     echo "fixtures: $fixtures"
     echo "results: $results"
@@ -204,6 +299,14 @@ run_tests() {
         echo "xcodebuild test hit the ${QE_TEST_TIMEOUT:-1200} s limit and was stopped" >&2
     fi
     unlock_fixtures "$fixtures"
+    # The large outside file and its copies take about 55 MB each per run;
+    # a copy saved with no extension is "big-copy".
+    rm -f "$outside/big.txt" "$outside/big-copy.txt" "$outside/big-copy" "$outside/big-target.txt"
+    if [ -n "$(ls -A "$shots")" ]; then
+        mkdir -p "$BUILD/shots"
+        ditto "$shots" "$BUILD/shots"
+        echo "shots: copied to $BUILD/shots"
+    fi
     # Stop any test host or UI-test app copy the run left behind.
     pkill -f "$TEST_DERIVED/Build/Products/Debug/QuickEdit.app/Contents/MacOS/QuickEdit" 2>/dev/null || true
     pkill -f "$TEST_DERIVED/Build/Products/Debug/QuickEditUITests-Runner.app/Contents/MacOS/QuickEditUITests-Runner" 2>/dev/null || true
@@ -342,6 +445,55 @@ case "$cmd" in
             || die "the 1 GB and 512 MB open tests did not run optimized (log: $TEST_LOG)"
         echo "SPEED: PASS"
         ;;
+    quick)
+        # The check for each change (user decisions U6, 2026-10-25: under 10
+        # minutes). The full run (./build.sh test, about 25 min) stays for releases.
+        # Keeps: the raw-typing lint; every unit test class but the typing
+        # speed one; the UI tests in QUICK_UI_TESTS, which guard file bytes
+        # and the open, type, save, close and find flows, plus the sandbox's
+        # user-picked file paths; and the UI test classes in QUICK_UI_CLASSES.
+        # Leaves out: launchbench-test.sh (4.5 min, checks the race harness),
+        # build-sh-test.sh, sandbox-release-test.sh (a Release build),
+        # TypingSpeedTests, the slow layout, encoding panel, PDF, restoration
+        # and screenshot UI tests, and the other SandboxUITests.
+        # Every listed UI test and class must run at least one test, and the
+        # UI tests must run at all (M9 review row 2).
+        mkdir -p "$BUILD"
+        QE_SHELL_TESTS_DIR="$BUILD/quick-shell-tests"
+        rm -rf "$QE_SHELL_TESTS_DIR"; mkdir -p "$QE_SHELL_TESTS_DIR"
+        ln -s "$ROOT/bench/tests/raw-typing-lint-test.sh" "$QE_SHELL_TESTS_DIR/"
+        export QE_SHELL_TESTS_DIR
+        run_shell_tests
+        quick=""
+        for file in "$ROOT"/QuickEditTests/*Tests.swift; do
+            name="$(basename "$file" .swift)"
+            [ "$name" = TypingSpeedTests ] && continue
+            quick+=" QuickEditTests/$name"
+        done
+        QUICK_UI_TESTS="OpenTypeSaveTests/testOpenTypeSaveExistingFile
+            OpenTypeSaveTests/testNewDocumentSaveAs
+            OpenTypeSaveTests/testSaveBoundaryUndoAndQuitKeepsEdits
+            DocumentLifeTests/testClosingAnEditedUntitledDocumentAsksAndDeleteCloses
+            DocumentLifeTests/testClosingANamedEditedDocumentSavesWithoutAsking
+            ExternalChangeTests/testEditedDocumentShowsConflictOnSave
+            FindAndLineTests/testTypingInFindBarFindsAMatch
+            FindAndLineTests/testCopyPasteUndoRedoCutInTheKeyWindow
+            WindowsAndMenusTests/testOpenRecentListsAnOpenedFile
+            SandboxUITests/testOutsideFilePickedInOpenPanelSavesAndReopensFromOpenRecent
+            SandboxUITests/testOutsideFileSavesRevertsAndExportsAPDF"
+        QUICK_UI_CLASSES="ShortcutUITests AccessibilityAuditTests"
+        ui_ok=0
+        ui_tests_possible && ui_ok=1
+        [ "$ui_ok" -eq 1 ] || die "UI tests cannot run (reason above), so ./build.sh quick cannot pass"
+        for t in $QUICK_UI_TESTS $QUICK_UI_CLASSES; do quick+=" QuickEditUITests/$t"; done
+        QE_TEST_TIMEOUT="${QE_TEST_TIMEOUT:-600}" run_tests "$quick" quick
+        for t in $QUICK_UI_TESTS $QUICK_UI_CLASSES; do
+            pattern="Test Case '-\\[QuickEditUITests\\.${t%%/*}"
+            [[ "$t" == */* ]] && pattern+=" ${t#*/}\\]"
+            grep -qE "$pattern.*' passed" "$TEST_LOG" || die "listed UI test $t did not run (log: $TEST_LOG)"
+        done
+        echo "QUICK: every listed UI test ran"
+        ;;
     uicheck)
         # Only the check that ./build.sh test runs before any UI test.
         ui_tests_possible || die "UI tests cannot run (reason above)"
@@ -354,8 +506,8 @@ case "$cmd" in
         run_tests "$*" only
         ;;
     dist)
-        milestone="${2:-}"
-        [[ "$milestone" =~ ^M[0-9]+$ ]] || die "usage: ./build.sh dist M<n> [--skip-tests]"
+        name="${2:-}"
+        [[ "$name" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]] || die "usage: ./build.sh dist <name> [--skip-tests] (for example 1.0)"
         if [ "${3:-}" = "--skip-tests" ]; then
             SKIP_WARNING="WARNING: --skip-tests given; packaging WITHOUT running the tests (root use only)"
             echo "$SKIP_WARNING" >&2
@@ -367,21 +519,22 @@ case "$cmd" in
         fi
         release_build
         mkdir -p "$ROOT/builds"
-        zip="$ROOT/builds/QuickEdit-$milestone.zip"
-        rm -f "$zip"
-        ditto -c -k --keepParent "$APP" "$zip" || die "zip"
+        dmg="$ROOT/builds/QuickEdit-$name.dmg"
+        # Releases are DMGs (M10 n3). A zip of the same name from an older
+        # dist run would make make-dmg.sh's zip guard fail, so it goes first.
+        rm -f "$ROOT/builds/QuickEdit-$name.zip"
+        dmg_flags=()
         if [ "$SIGNED_DEVID" -eq 1 ]; then
-            xcrun notarytool submit "$zip" --wait --keychain-profile "$NOTARY_PROFILE" || die "notarize"
-            xcrun stapler staple "$APP" || die "staple"
-            rm -f "$zip"
-            ditto -c -k --keepParent "$APP" "$zip" || die "zip after staple"
-            echo "NOTARIZE: done"
+            echo "NOTARIZE: the app and the DMG (profile $NOTARY_PROFILE)"
         else
-            echo "NOTARIZE: skipped (keychain locked)"
+            dmg_flags=(--no-notarize)
+            echo "NOTARIZE: skipped (keychain locked); the DMG is not signed"
         fi
-        echo "dist: $zip ($(stat -f %z "$zip") bytes)"
+        QE_DEVID="$DEVID" NOTARY_PROFILE="$NOTARY_PROFILE" \
+            "$ROOT/scripts/make-dmg.sh" "$APP" "$dmg" ${dmg_flags[@]+"${dmg_flags[@]}"} || die "make-dmg.sh"
+        echo "dist: $dmg ($(stat -f %z "$dmg") bytes)"
         ;;
     *)
-        die "unknown command '$cmd' (use: release, test, unit, speed, dist M<n>)"
+        die "unknown command '$cmd' (use: release, test, unit, quick, only, speed, dist <name>)"
         ;;
 esac

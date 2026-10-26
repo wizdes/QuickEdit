@@ -40,7 +40,7 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(window.contentView?.frame.width, 440)
 
         let tabs = try XCTUnwrap(controller.tabView)
-        XCTAssertEqual(tabs.tabViewItems.map(\.label), ["New Document", "Open and Save"])
+        XCTAssertEqual(tabs.tabViewItems.map(\.label), ["New Document", "Open and Save", "Keyboard"])
 
         let titles = Dictionary(uniqueKeysWithValues: controller.checkboxes.map { ($0.key, $0.value.title) })
         XCTAssertEqual(titles, [
@@ -314,8 +314,7 @@ final class SettingsTests: XCTestCase {
         let controller = makeController()
         let window = try XCTUnwrap(controller.window)
         let tabs = try XCTUnwrap(controller.tabView)
-        let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("build/shots", isDirectory: true)
+        let folder = TestShots.folder
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         for (index, name, appearance) in [(0, "settings-new-document", NSAppearance.Name.darkAqua),
                                           (1, "settings-open-and-save", .darkAqua),
@@ -366,9 +365,28 @@ struct SavedSettings {
     /// The suite's saved values.
     var persisted: [String: Any]? { store.persistentDomain(forName: suiteName) }
 
+    /// The plist file a defaults suite is saved in (in the container, as
+    /// the test host is sandboxed).
+    static func suiteFile(_ name: String) -> URL {
+        URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Preferences/\(name).plist")
+    }
+
+    /// Empties the suite and deletes its plist file: thousands of empty
+    /// tests-<UUID>.plist files were left behind before (sandbox review F).
+    static func deleteSuite(_ name: String) {
+        precondition(name.hasPrefix("dev.yili.QuickEdit.tests-"), "not a test suite: \(name)")
+        UserDefaults(suiteName: name)?.removePersistentDomain(forName: name)
+        CFPreferencesAppSynchronize(name as CFString)
+        let file = suiteFile(name)
+        guard FileManager.default.fileExists(atPath: file.path) else { return }
+        do { try FileManager.default.removeItem(at: file) } catch {
+            FileHandle.standardError.write(Data("QuickEditTests: could not delete \(file.path): \(error)\n".utf8))
+        }
+    }
+
     func restore() {
         Defaults.store = .standard
-        store.removePersistentDomain(forName: suiteName)
+        Self.deleteSuite(suiteName)
         NSFont.setUserFixedPitch(fixedPitchFont)
         if let domain {
             UserDefaults.standard.setPersistentDomain(domain, forName: Self.bundleID)
