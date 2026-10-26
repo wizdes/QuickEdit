@@ -86,7 +86,9 @@ class QuickEditUITestCase: XCTestCase {
     /// checkbox, go to `folder` with Cmd+Shift+G, and press Save. The name is
     /// typed BEFORE the checkbox changes, as a person does, so a checkbox that
     /// overwrites the typed name fails the test (M1 review row 3).
-    func fillSavePanel(name: String, folder: URL, addTxtExtension: Bool? = nil,
+    /// `replacing`: a file of that name is there, so press Replace on the
+    /// question the panel asks before it closes.
+    func fillSavePanel(name: String, folder: URL, addTxtExtension: Bool? = nil, replacing: Bool = false,
                        file: StaticString = #filePath, line: UInt = #line) {
         let sheet = savePanel(file: file, line: line)
         if let addTxtExtension {
@@ -111,6 +113,12 @@ class QuickEditUITestCase: XCTestCase {
         // Let the panel settle on the folder, then press Save.
         RunLoop.current.run(until: Date().addingTimeInterval(1.0))
         safePress(.return, [])
+        if replacing {
+            let replace = app.buttons["Replace"].firstMatch
+            XCTAssertTrue(replace.waitForExistence(timeout: 10), "no question before replacing \(name)",
+                          file: file, line: line)
+            replace.click()
+        }
         XCTAssertTrue(sheet.waitForNonExistence(timeout: 10), "Save panel did not close", file: file, line: line)
     }
 

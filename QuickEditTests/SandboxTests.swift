@@ -6,13 +6,21 @@ import XCTest
 /// sandboxed Debug app (M9), which may not write into the repo, so
 /// ./build.sh passes a folder in the app's container as QE_SHOTS and copies
 /// it to build/shots after the run. Without ./build.sh, the host's own
-/// temporary folder.
+/// temporary folder, and one line on stderr says so (sandbox review G).
 enum TestShots {
-    static var folder: URL {
+    @MainActor private static var saidWhere = false
+
+    @MainActor static var folder: URL {
         if let path = ProcessInfo.processInfo.environment["QE_SHOTS"] {
             return URL(fileURLWithPath: path, isDirectory: true)
         }
-        return FileManager.default.temporaryDirectory.appendingPathComponent("QuickEditShots", isDirectory: true)
+        let fallback = FileManager.default.temporaryDirectory.appendingPathComponent("QuickEditShots", isDirectory: true)
+        if !saidWhere {
+            saidWhere = true
+            FileHandle.standardError.write(Data(("QuickEditTests: QE_SHOTS is not set (not run by ./build.sh), so "
+                + "screenshots go to \(fallback.path) and are not copied to build/shots\n").utf8))
+        }
+        return fallback
     }
 }
 
@@ -36,11 +44,36 @@ final class SandboxTests: XCTestCase {
                      "the Debug app must not carry container-migration.plist")
     }
 
+    /// A test's own defaults suite leaves no plist file behind once the
+    /// test puts the settings back (sandbox review F).
+    func testTestDefaultsSuiteLeavesNoFileBehind() {
+        let saved = SavedSettings()
+        saved.store.set("probe", forKey: "QETestsSuiteProbe")
+        CFPreferencesAppSynchronize(saved.suiteName as CFString)
+        let file = SavedSettings.suiteFile(saved.suiteName)
+        let deadline = Date().addingTimeInterval(5)
+        while !FileManager.default.fileExists(atPath: file.path), Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "the suite was never saved to \(file.path)")
+        saved.restore()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path), "\(file.path) was left behind")
+    }
+
     /// The sandbox keeps the app out of the user's folders it was not given.
     func testWritingOutsideTheContainerIsRefused() {
         let realHome = getpwuid(getuid()).flatMap { String(validatingCString: $0.pointee.pw_dir) } ?? "/Users"
+        // A clearly named probe; if the write ever works, it is removed at
+        // once, so nothing is left in the user's folders (sandbox review E).
         let outside = URL(fileURLWithPath: realHome)
-            .appendingPathComponent("Library/Caches/QuickEdit-sandbox-probe-\(UUID().uuidString)")
+            .appendingPathComponent("Library/Caches/QuickEditTests-sandbox-probe-delete-me-\(UUID().uuidString).txt")
+        defer {
+            if FileManager.default.fileExists(atPath: outside.path) {
+                do { try FileManager.default.removeItem(at: outside) } catch {
+                    XCTFail("the probe \(outside.path) was written and cannot be removed: \(error); delete it by hand")
+                }
+            }
+        }
         XCTAssertThrowsError(try Data("x".utf8).write(to: outside), "the app wrote \(outside.path) outside its container")
         XCTAssertFalse(FileManager.default.fileExists(atPath: outside.path))
     }

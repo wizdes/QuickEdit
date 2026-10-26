@@ -17,6 +17,18 @@ import AppKit
 /// as the two characters `\n`: a real newline in the launch argument did
 /// not survive the UI-test launch in that run ("after\n" was written as "after").
 ///
+/// With `-QETestExternalWriteAfterCaretAtEnd YES` too, the `<seconds>`
+/// count from the moment a document window for `<path>` is open and its
+/// caret is at the end of the text, not from launch. The test moves the
+/// caret (Cmd+Down) once it has read the opened text, so the write comes
+/// after the test saw the old text, however slow the Open panel is (31 s
+/// once in a loaded run). It gives up after 180 s.
+///
+/// `-QETestReadOnlyLimitBytes <n>` lowers the read-only limit
+/// (`TextDocument.readOnlyThreshold`, 512 MiB) to `<n>` bytes, so a UI test
+/// can use the read-only large-file paths (Save As copies the clone) with a
+/// small file. `<n>` must be a whole number from 1 up to the default.
+///
 /// `-QETestExposeSelection YES` copies the selected text of a document's
 /// text view into that view's accessibility label ("selection:<text>"),
 /// which XCUITest reads as `label`, on every selection change. A UI test can
@@ -34,6 +46,23 @@ enum TestHooks {
             startExposingSelection()
         }
         startExternalWrite(arguments: arguments)
+        applyReadOnlyLimit(arguments: arguments)
+    }
+
+    static let readOnlyLimitFlag = "-QETestReadOnlyLimitBytes"
+
+    /// Sets `TextDocument.readOnlyThreshold` from `-QETestReadOnlyLimitBytes`.
+    /// A bad value is reported and changes nothing.
+    static func applyReadOnlyLimit(arguments: [String]) {
+        guard let index = arguments.firstIndex(of: readOnlyLimitFlag) else { return }
+        guard index + 1 < arguments.count, let bytes = Int(arguments[index + 1]),
+              bytes >= 1, bytes <= TextDocument.defaultReadOnlyThreshold else {
+            FileHandle.standardError.write(Data(("QuickEdit: \(readOnlyLimitFlag) wants a whole number of bytes from 1 to "
+                + "\(TextDocument.defaultReadOnlyThreshold); the read-only limit stays \(TextDocument.readOnlyThreshold)\n").utf8))
+            return
+        }
+        TextDocument.readOnlyThreshold = bytes
+        FileHandle.standardError.write(Data("QuickEdit: test read-only limit is \(bytes) bytes\n".utf8))
     }
 
     /// Starts copying each text view's selection into its accessibility label.
@@ -65,7 +94,7 @@ enum TestHooks {
         textView.setAccessibilityLabel(selectionLabelPrefix + text.substring(with: range))
     }
 
-    private static func startExternalWrite(arguments: [String]) {
+    static func startExternalWrite(arguments: [String]) {
         func value(after flag: String) -> String? {
             guard let index = arguments.firstIndex(of: flag), index + 1 < arguments.count else { return nil }
             return arguments[index + 1]
@@ -77,6 +106,43 @@ enum TestHooks {
                 + "and -QETestExternalWriteDelay <seconds>\n").utf8))
             return
         }
+        if value(after: "-QETestExternalWriteAfterCaretAtEnd") == "YES" {
+            waitForCaretAtEnd(of: path, deadline: Date().addingTimeInterval(180)) {
+                write(text, to: path, after: delay)
+            }
+        } else {
+            write(text, to: path, after: delay)
+        }
+    }
+
+    /// True when `path` has a document window on screen whose caret is at
+    /// the end of a text that is not empty.
+    static func hasCaretAtEnd(for path: String) -> Bool {
+        let wanted = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        return NSDocumentController.shared.documents.contains { document in
+            guard document.fileURL?.resolvingSymlinksInPath().path == wanted else { return false }
+            return document.windowControllers.contains { controller in
+                guard controller.window?.isVisible == true,
+                      let textView = (controller as? DocumentWindowController)?.textView else { return false }
+                let length = (textView.string as NSString).length
+                return length > 0 && textView.selectedRange() == NSRange(location: length, length: 0)
+            }
+        }
+    }
+
+    /// Checks every 0.1 s on the main thread until `path` has its caret at the end.
+    private static func waitForCaretAtEnd(of path: String, deadline: Date, then run: @escaping @MainActor () -> Void) {
+        if hasCaretAtEnd(for: path) { return run() }
+        guard Date() < deadline else {
+            FileHandle.standardError.write(Data("QuickEdit: -QETestExternalWriteAfterCaretAtEnd: \(path) never had its caret at the end; no test write\n".utf8))
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            MainActor.assumeIsolated { waitForCaretAtEnd(of: path, deadline: deadline, then: run) }
+        }
+    }
+
+    private static func write(_ text: String, to path: String, after delay: Double) {
         DispatchQueue.global().asyncAfter(deadline: .now() + delay) {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/sh")

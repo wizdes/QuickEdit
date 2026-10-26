@@ -823,6 +823,10 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
     /// A large-file reload has detached this window's layout manager.
     private(set) var isReloading = false
 
+    /// The files of the drag over the window that QuickEdit opens, worked
+    /// out once when the drag enters (M9 review row 11); nil between drags.
+    private(set) var draggedOpenableURLs: [URL]?
+
     func beginReload() {
         isReloading = true
         stopIdleLayout()
@@ -877,16 +881,30 @@ extension DocumentWindowController: NSDraggingDestination {
         }
     }
 
+    /// Reads each dragged file's type once per drag; draggingUpdated, sent
+    /// on every mouse move, reuses the answer.
     func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        Self.openableFileURLs(on: sender.draggingPasteboard).isEmpty ? [] : .copy
+        let urls = Self.openableFileURLs(on: sender.draggingPasteboard)
+        draggedOpenableURLs = urls
+        return urls.isEmpty ? [] : .copy
     }
 
     func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        draggingEntered(sender)
+        guard let urls = draggedOpenableURLs else { return draggingEntered(sender) }
+        return urls.isEmpty ? [] : .copy
+    }
+
+    func draggingExited(_ sender: (any NSDraggingInfo)?) {
+        draggedOpenableURLs = nil
+    }
+
+    func draggingEnded(_ sender: any NSDraggingInfo) {
+        draggedOpenableURLs = nil
     }
 
     func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
-        let urls = Self.openableFileURLs(on: sender.draggingPasteboard)
+        let urls = draggedOpenableURLs ?? Self.openableFileURLs(on: sender.draggingPasteboard)
+        draggedOpenableURLs = nil
         guard !urls.isEmpty else { return false }
         for url in urls {
             NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { _, _, error in
@@ -896,4 +914,3 @@ extension DocumentWindowController: NSDraggingDestination {
         return true
     }
 }
-

@@ -218,4 +218,3 @@ final class PlainTextView: NSTextView {
         return true
     }
 }
-

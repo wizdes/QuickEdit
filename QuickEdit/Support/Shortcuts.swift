@@ -168,6 +168,57 @@ enum Shortcuts {
         KeyShortcut("\u{1B}", [.command, .option]),
     ]
 
+    /// Standard text-editing keys (macOS's StandardKeyBinding.dict and
+    /// NSTextView's own Cmd and Option keys): a menu shortcut on one of
+    /// them would stop that editing action in every text field. Each with
+    /// the editing action it does, named as in the Cocoa text system.
+    static let textEditingKeys: [(shortcut: KeyShortcut, action: String)] = {
+        func key(_ value: Int) -> String { String(Character(UnicodeScalar(UInt32(value))!)) }
+        let left = key(NSLeftArrowFunctionKey), right = key(NSRightArrowFunctionKey)
+        let up = key(NSUpArrowFunctionKey), down = key(NSDownArrowFunctionKey)
+        let delete = "\u{08}"
+        var keys: [(KeyShortcut, String)] = [
+            (KeyShortcut("a", [.control]), "Move to Beginning of Line"),
+            (KeyShortcut("e", [.control]), "Move to End of Line"),
+            (KeyShortcut("b", [.control]), "Move Backward"),
+            (KeyShortcut("f", [.control]), "Move Forward"),
+            (KeyShortcut("n", [.control]), "Move Down"),
+            (KeyShortcut("p", [.control]), "Move Up"),
+            (KeyShortcut("k", [.control]), "Delete to End of Line"),
+            (KeyShortcut("y", [.control]), "Yank"),
+            (KeyShortcut("d", [.control]), "Delete Forward"),
+            (KeyShortcut("h", [.control]), "Delete Backward"),
+            (KeyShortcut("t", [.control]), "Transpose"),
+            (KeyShortcut("o", [.control]), "Insert Line Break"),
+            (KeyShortcut("l", [.control]), "Center Selection in Visible Area"),
+            (KeyShortcut("v", [.control]), "Page Down"),
+            (KeyShortcut(left, [.command]), "Move to Beginning of Line"),
+            (KeyShortcut(right, [.command]), "Move to End of Line"),
+            (KeyShortcut(up, [.command]), "Move to Beginning of Document"),
+            (KeyShortcut(down, [.command]), "Move to End of Document"),
+            (KeyShortcut(left, [.option]), "Move Word Left"),
+            (KeyShortcut(right, [.option]), "Move Word Right"),
+            (KeyShortcut(up, [.option]), "Move to Beginning of Paragraph"),
+            (KeyShortcut(down, [.option]), "Move to End of Paragraph"),
+            (KeyShortcut(delete, [.command]), "Delete to Beginning of Line"),
+            (KeyShortcut(delete, [.option]), "Delete Word Backward"),
+        ]
+        // Shift with each arrow key extends the selection the same way.
+        for (shortcut, action) in keys where [left, right, up, down].contains(shortcut.key) {
+            keys.append((KeyShortcut(shortcut.key, shortcut.modifiers.union(.shift)),
+                         action.replacingOccurrences(of: "Move", with: "Select")))
+        }
+        return keys
+    }()
+
+    /// The editing action `shortcut` does in text, if any. Delete is
+    /// spelled two ways ("\u{08}" when recorded, "\u{7F}" in menus).
+    static func textEditingAction(for shortcut: KeyShortcut) -> String? {
+        var pressed = shortcut.normalized
+        if pressed.key == "\u{7F}" { pressed = KeyShortcut("\u{08}", pressed.modifiers) }
+        return textEditingKeys.first { $0.shortcut.matches(pressed) }?.action
+    }
+
     // MARK: The saved changes
 
     /// The saved changes, by command id. A malformed entry is reported on
@@ -264,6 +315,8 @@ enum Shortcuts {
         case clash(KeyShortcut, name: String, menuPath: String)
         /// macOS keeps it (Cmd+Tab, Cmd+Space, Cmd+Option+Esc).
         case system(KeyShortcut)
+        /// A standard text-editing key; the action it does in text.
+        case textEditing(KeyShortcut, action: String)
         /// Needs Cmd or Ctrl, unless it is a function key.
         case needsModifier
 
@@ -274,6 +327,8 @@ enum Shortcuts {
                 "\(shortcut.display) is already used by \u{201C}\(name)\u{201D} in the \(path) menu."
             case let .system(shortcut):
                 "\(shortcut.display) is kept by macOS."
+            case let .textEditing(shortcut, action):
+                "\(shortcut.display) is the text-editing key for \u{201C}\(action)\u{201D}."
             case .needsModifier:
                 "A shortcut needs \u{2318} or \u{2303}, unless it is a function key."
             }
@@ -282,7 +337,7 @@ enum Shortcuts {
         /// The part shown in bold: the keys.
         var keysText: String? {
             switch self {
-            case let .clash(shortcut, _, _), let .system(shortcut): shortcut.display
+            case let .clash(shortcut, _, _), let .system(shortcut), let .textEditing(shortcut, _): shortcut.display
             case .needsModifier: nil
             }
         }
@@ -293,7 +348,20 @@ enum Shortcuts {
     /// (Close All, Emoji & Symbols), so a clash names the real item.
     static func refusal(for shortcut: KeyShortcut, command: MenuCommand, in menu: NSMenu?) -> Refusal? {
         if Self.systemReserved.contains(where: { $0.matches(shortcut) }) { return .system(shortcut.normalized) }
+        if let action = textEditingAction(for: shortcut) { return .textEditing(shortcut.normalized, action: action) }
         if !shortcut.hasCommandOrControl && !shortcut.isFunctionKey { return .needsModifier }
+        return clash(for: shortcut, command: command, in: menu)
+    }
+
+    /// Nil when `command` may go back to its default shortcut; else the
+    /// clash with the item that has that key now (M9 review row 1). Only a
+    /// clash counts: a default key is never refused for its own kind.
+    static func resetRefusal(for command: MenuCommand, in menu: NSMenu?) -> Refusal? {
+        guard !command.defaultShortcut.isNone else { return nil }
+        return clash(for: command.defaultShortcut, command: command, in: menu)
+    }
+
+    private static func clash(for shortcut: KeyShortcut, command: MenuCommand, in menu: NSMenu?) -> Refusal? {
         guard let menu else { return nil }
         if let (item, path) = itemUsing(shortcut, in: menu, path: [], skipping: command.id) {
             let name = (item.representedObject as? MenuCommand)?.name.components(separatedBy: " \u{203A} ").last
@@ -333,8 +401,9 @@ enum Shortcuts {
 
     /// Every command in `menuBar`, with a header row per menu and per
     /// submenu of more than one command (one level: Edit > Find, never
-    /// deeper). A submenu of one command shows it in a row of its own,
-    /// named "Open Recent › Clear Menu".
+    /// deeper). A submenu of one command would show it in a row of its
+    /// own; none has one now (Open Recent's Clear Menu is AppKit's item,
+    /// not a command, so it has no row).
     static func rows(for menuBar: NSMenu) -> [Row] {
         var rows: [Row] = []
         // AppKit keeps a hidden copy of some items (Enter Full Screen); the

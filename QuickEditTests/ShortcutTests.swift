@@ -124,16 +124,120 @@ final class ShortcutTests: XCTestCase {
         XCTAssertNil(try menuAnswers(relaunched, "n", [.command]))
     }
 
-    /// The item `menu` would run for this key press, found the way AppKit
-    /// matches key equivalents (characters, then modifiers).
+    /// The item `menu` runs for this key press: the event goes through
+    /// AppKit's own `NSMenu.performKeyEquivalent` (M9 review row 6). Every
+    /// command item's action is pointed at a spy first, so nothing really
+    /// runs, and the spy names the item AppKit chose.
     private func menuAnswers(_ menu: NSMenu, _ key: String, _ modifiers: NSEvent.ModifierFlags) throws -> NSMenuItem? {
+        let keyCodes: [String: UInt16] = ["y": 16, "n": 45, "p": 35, "s": 1, "o": 31]
         let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers,
                                                    timestamp: 0, windowNumber: 0, context: nil,
                                                    characters: modifiers.contains(.shift) ? key.uppercased() : key,
-                                                   charactersIgnoringModifiers: key, isARepeat: false, keyCode: 0))
-        let pressed = KeyShortcut(key, modifiers)
-        _ = event
-        return Shortcuts.commandItems(in: menu).first { KeyShortcut(of: $0.item).matches(pressed) }?.item
+                                                   charactersIgnoringModifiers: key,
+                                                   isARepeat: false, keyCode: try XCTUnwrap(keyCodes[key], key)))
+        let spy = MenuActionSpy()
+        for (item, _) in Shortcuts.commandItems(in: menu) {
+            item.target = spy
+            item.action = #selector(MenuActionSpy.ran(_:))
+        }
+        let handled = menu.performKeyEquivalent(with: event)
+        XCTAssertEqual(handled, spy.ran != nil, "performKeyEquivalent said \(handled), the spy saw \(String(describing: spy.ran))")
+        return spy.ran
+    }
+
+    /// Two commands, one key, never: resetting New to Cmd+N while Print
+    /// has Cmd+N is refused with the recorder's clash message (M9 review
+    /// row 1), by the reset button and by Delete on the row.
+    func testResettingARowWhoseDefaultKeyIsTakenIsRefused() throws {
+        let menu = MainMenu.build()
+        let tab = makeTab(menu)
+        let (newItem, new) = try command("file.new", in: menu)
+        let (printItem, print) = try command("file.print", in: menu)
+        let moved = KeyShortcut("n", [.control, .option, .command])
+        Shortcuts.set(moved, for: new, applyingTo: menu)
+        Shortcuts.set(KeyShortcut("n"), for: print, applyingTo: menu)
+        tab.reload()
+        let expected = "\u{2318}N is already used by \u{201C}Print\u{2026}\u{201D} in the File menu."
+        XCTAssertEqual(Shortcuts.resetRefusal(for: new, in: menu)?.message, expected)
+
+        let row = try XCTUnwrap(tab.row(of: "file.new"))
+        let reset = tab.tableView.view(atColumn: 1, row: row, makeIfNecessary: true)?.subviews
+            .first { $0.identifier == KeyboardTabController.resetButtonIdentifier("file.new") } as? NSButton
+        try XCTUnwrap(reset).performClick(nil)
+        XCTAssertEqual(KeyShortcut(of: newItem), moved, "New keeps its moved key")
+        XCTAssertEqual(KeyShortcut(of: printItem), KeyShortcut("n"), "Print keeps Cmd+N")
+        XCTAssertEqual(tab.refusal?.message, expected)
+        XCTAssertTrue(tab.messageField.stringValue.hasSuffix(expected), tab.messageField.stringValue)
+
+        tab.tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        tab.tableView.keyDown(with: try key(51, "\u{7F}"))
+        XCTAssertEqual(KeyShortcut(of: newItem), moved, "Delete did not reset New either")
+        XCTAssertEqual(KeyShortcut(of: printItem), KeyShortcut("n"))
+        let stored = try XCTUnwrap(saved.persisted?[Defaults.keyboardShortcutsKey] as? [String: Any])
+        XCTAssertEqual(Set(stored.keys), ["file.new", "file.print"])
+
+        // Once Print lets go of Cmd+N, the reset works and the message goes.
+        Shortcuts.set(nil, for: print, applyingTo: menu)
+        tab.reload()
+        tab.resetRow(try XCTUnwrap(tab.row(of: "file.new")))
+        XCTAssertEqual(KeyShortcut(of: newItem), KeyShortcut("n"))
+        XCTAssertNil(tab.refusal)
+        XCTAssertEqual(tab.messageField.stringValue, "")
+    }
+
+    /// The standard text-editing keys are refused with the editing action's
+    /// name (M9 review row 5); the same keys without the editing modifier,
+    /// or with Cmd added to a Ctrl key, are not editing keys.
+    func testTextEditingKeysAreRefusedWithTheActionsName() throws {
+        let menu = MainMenu.build()
+        let (_, save) = try command("file.save", in: menu)
+        func key(_ value: Int) -> String { String(Character(UnicodeScalar(UInt32(value))!)) }
+        let left = key(NSLeftArrowFunctionKey), right = key(NSRightArrowFunctionKey)
+        let up = key(NSUpArrowFunctionKey), down = key(NSDownArrowFunctionKey)
+        var keys: [(KeyShortcut, String)] = [
+            (KeyShortcut("a", [.control]), "Move to Beginning of Line"),
+            (KeyShortcut("e", [.control]), "Move to End of Line"),
+            (KeyShortcut("b", [.control]), "Move Backward"), (KeyShortcut("f", [.control]), "Move Forward"),
+            (KeyShortcut("n", [.control]), "Move Down"), (KeyShortcut("p", [.control]), "Move Up"),
+            (KeyShortcut("k", [.control]), "Delete to End of Line"), (KeyShortcut("y", [.control]), "Yank"),
+            (KeyShortcut("d", [.control]), "Delete Forward"), (KeyShortcut("h", [.control]), "Delete Backward"),
+            (KeyShortcut("t", [.control]), "Transpose"), (KeyShortcut("o", [.control]), "Insert Line Break"),
+            (KeyShortcut(left, [.command]), "Move to Beginning of Line"),
+            (KeyShortcut(right, [.command]), "Move to End of Line"),
+            (KeyShortcut(up, [.command]), "Move to Beginning of Document"),
+            (KeyShortcut(down, [.command]), "Move to End of Document"),
+            (KeyShortcut(left, [.option]), "Move Word Left"), (KeyShortcut(right, [.option]), "Move Word Right"),
+            (KeyShortcut(up, [.option]), "Move to Beginning of Paragraph"),
+            (KeyShortcut(down, [.option]), "Move to End of Paragraph"),
+            (KeyShortcut("\u{08}", [.command]), "Delete to Beginning of Line"),
+            (KeyShortcut("\u{7F}", [.command]), "Delete to Beginning of Line"),
+            (KeyShortcut("\u{08}", [.option]), "Delete Word Backward"),
+            (KeyShortcut(left, [.command, .shift]), "Select to Beginning of Line"),
+        ]
+        // Ctrl+A as the recorder hands it over from a real key press.
+        if case let .candidate(recorded) = ShortcutRecorder.outcome(for: try self.key(0, "\u{01}", [.control])) {
+            keys.append((recorded, "Move to Beginning of Line"))
+        } else {
+            XCTFail("the recorder did not read Ctrl+A")
+        }
+        for (shortcut, action) in keys {
+            let refusal = Shortcuts.refusal(for: shortcut, command: save, in: menu)
+            XCTAssertEqual(refusal?.message,
+                           "\(shortcut.normalized.display) is the text-editing key for \u{201C}\(action)\u{201D}.",
+                           shortcut.display)
+            XCTAssertEqual(refusal?.keysText, shortcut.normalized.display)
+        }
+        XCTAssertNil(Shortcuts.refusal(for: KeyShortcut("a", [.control, .command]), command: save, in: menu))
+        XCTAssertNil(Shortcuts.refusal(for: KeyShortcut(left, [.control, .command]), command: save, in: menu))
+
+        // The Keyboard tab refuses it and keeps recording.
+        let tab = makeTab(menu)
+        tab.startRecording("file.save")
+        tab.handle(.candidate(KeyShortcut("k", [.control])))
+        XCTAssertTrue(tab.isRecording)
+        XCTAssertEqual(tab.refusal?.message, "\u{2303}K is the text-editing key for \u{201C}Delete to End of Line\u{201D}.")
+        XCTAssertEqual(KeyShortcut(of: try command("file.save", in: menu).0), KeyShortcut("s"))
+        tab.endRecording()
     }
 
     func testRestoreDefaultsPutsEveryKeyBack() throws {
@@ -217,7 +321,9 @@ final class ShortcutTests: XCTestCase {
         XCTAssertTrue(f5.isFunctionKey)
         XCTAssertEqual(f5.display, "F5")
         XCTAssertNil(Shortcuts.refusal(for: f5, command: save, in: menu))
-        XCTAssertNil(Shortcuts.refusal(for: KeyShortcut("y", [.control]), command: save, in: menu))
+        // Ctrl+J: Ctrl alone is enough (Ctrl+Y, used here before M9 review
+        // row 5, is the text-editing key Yank now).
+        XCTAssertNil(Shortcuts.refusal(for: KeyShortcut("j", [.control]), command: save, in: menu))
     }
 
     // MARK: 5. Names of keys
@@ -415,13 +521,18 @@ final class ShortcutTests: XCTestCase {
         let window = try XCTUnwrap(controller.window)
         let tabs = try XCTUnwrap(controller.tabView)
         XCTAssertEqual(tabs.tabViewItems.map(\.label), ["New Document", "Open and Save", "Keyboard"])
-        // The Keyboard tab's keyboard loop: the table, then Restore Keyboard Defaults.
         let tab = try XCTUnwrap(controller.keyboardTab)
-        XCTAssertTrue(tab.tableView.nextKeyView === tab.restoreButton)
-        XCTAssertTrue(tab.restoreButton.nextKeyView === tab.tableView)
         let top = window.frame.maxY
         let small = window.frame.height
         tabs.selectTabViewItem(at: 2)
+        // The Keyboard tab's keyboard loop: the table, Restore Keyboard
+        // Defaults, the window's Restore All Defaults, the tab strip (M9
+        // review row 4).
+        let restoreAll = try XCTUnwrap(controller.restoreButton)
+        XCTAssertTrue(tab.tableView.nextKeyView === tab.restoreButton)
+        XCTAssertTrue(tab.restoreButton.nextKeyView === restoreAll)
+        XCTAssertTrue(restoreAll.nextKeyView === tabs)
+        XCTAssertTrue(tabs.nextKeyView === tab.tableView)
         XCTAssertGreaterThan(window.frame.height, small)
         XCTAssertEqual(window.frame.maxY, top, accuracy: 0.5, "the window keeps its top edge")
         XCTAssertEqual(window.contentView?.frame.width, 440)
@@ -464,4 +575,11 @@ final class ShortcutTests: XCTestCase {
         }
         tab.endRecording()
     }
+}
+
+/// Stands in for every menu action while a key event goes through a menu.
+@MainActor
+private final class MenuActionSpy: NSObject {
+    private(set) var ran: NSMenuItem?
+    @objc func ran(_ sender: NSMenuItem) { ran = sender }
 }

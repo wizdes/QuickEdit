@@ -112,6 +112,28 @@ final class SystemPartsTests: XCTestCase {
         XCTAssertFalse(controller.performDragOperation(refused))
     }
 
+    /// The dragged files' types are read once, when the drag enters; each
+    /// draggingUpdated (sent on every mouse move) reuses the answer (M9
+    /// review row 11). A new drag reads them again.
+    func testDragWorksOutTheOpenableFilesOnceWhenItEnters() throws {
+        let (_, controller) = try untitled()
+        let text = try write("dragged\n", name: "dragged.txt")
+        let board = pasteboard([text])
+        let drop = FakeDrop(board)
+        XCTAssertEqual(controller.draggingEntered(drop), .copy)
+        XCTAssertEqual(controller.draggedOpenableURLs?.map(\.standardizedFileURL), [text.standardizedFileURL])
+        // Proof that updates do not read the pasteboard: empty it.
+        board.clearContents()
+        for _ in 0..<5 { XCTAssertEqual(controller.draggingUpdated(drop), .copy) }
+        controller.draggingExited(drop)
+        XCTAssertNil(controller.draggedOpenableURLs)
+        // A new drag over the now-empty pasteboard is refused.
+        XCTAssertEqual(controller.draggingEntered(drop), [])
+        XCTAssertEqual(controller.draggingUpdated(drop), [])
+        controller.draggingEnded(drop)
+        XCTAssertNil(controller.draggedOpenableURLs)
+    }
+
     /// A file dropped on the Dock icon reaches the app as an Open Documents
     /// Apple Event. This hands one straight to the app's event handler (no
     /// Launch Services, so nothing arrives after the test ends).
@@ -180,8 +202,26 @@ final class SystemPartsTests: XCTestCase {
         XCTAssertTrue(file.delegate === ShareMenuValidator.shared)
         let share = try XCTUnwrap(ShareMenuValidator.shareItem(in: file), "AppKit added no File > Share")
         XCTAssertNotNil(share.submenu)
-        ShareMenuValidator.shared.menuNeedsUpdate(file)
-        XCTAssertEqual(share.isEnabled, ShareMenuValidator.canShare(NSDocumentController.shared.currentDocument))
+
+        // M9 review row 7: with each window in front, the File menu is
+        // updated as when it opens (its delegate, then AppKit's own
+        // enabling), and Share follows the front document.
+        let untitledWindow = try XCTUnwrap(untitledDocument.windowControllers.first?.window)
+        let savedWindow = try XCTUnwrap(savedDocument.windowControllers.first?.window)
+        // The test host is not the active app, so it has no main window;
+        // the validator is told which window is in front.
+        let validator = ShareMenuValidator.shared
+        let liveFront = validator.frontWindow
+        defer { validator.frontWindow = liveFront }
+        for (window, document, enabled) in [(untitledWindow, untitledDocument, false), (savedWindow, savedDocument, true),
+                                            (untitledWindow, untitledDocument, false)] {
+            window.orderFront(nil)
+            validator.frontWindow = { window }
+            XCTAssertTrue(validator.frontDocument === document, "\(document.displayName ?? "?") is not the front document")
+            validator.menuNeedsUpdate(file)
+            file.update()
+            XCTAssertEqual(share.isEnabled, enabled, "Share with \(document.displayName ?? "?") in front")
+        }
     }
 
     // MARK: 3. Writing Tools (P73)
@@ -252,12 +292,17 @@ final class SystemPartsTests: XCTestCase {
             }
             collect(view)
             XCTAssertFalse(controls.isEmpty, item.label)
+            // M9 review row 4: the window's Restore All Defaults, under the
+            // tabs, is in every tab's loop, and the loop closes.
+            tabs.selectTabViewItem(item)
+            controls.append(try XCTUnwrap(controller.restoreButton))
             var loop: [NSView] = []
             var next: NSView? = controls.first
             while let view = next, !loop.contains(where: { $0 === view }), loop.count < 50 {
                 loop.append(view)
                 next = view.nextKeyView
             }
+            XCTAssertTrue(next === controls.first, "\(item.label): the key loop does not lead back to its first control")
             for control in controls {
                 XCTAssertTrue(loop.contains { $0 === control }, "\(item.label): \(control) is not in the key loop")
             }

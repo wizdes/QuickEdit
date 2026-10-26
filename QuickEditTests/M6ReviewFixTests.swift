@@ -187,12 +187,16 @@ final class M6ReviewFixTests: XCTestCase {
             view = current.nextKeyView
         }
         XCTAssertTrue(view === controller.checkboxes[.showPageBreaks], "the loop closes")
-        XCTAssertEqual(seen.count, 13, "Wrap, Paper size, Width, Height, Change…, 8 options")
-        // Open and Save: the .txt checkbox, then both pop-ups, and back.
+        // M9 review row 4: the loop also takes Restore All Defaults, under
+        // the tabs, and the tab strip.
+        XCTAssertEqual(seen.count, 15, "Wrap, Paper size, Width, Height, Change…, 8 options, Restore All Defaults, tabs")
+        XCTAssertTrue(seen.contains { $0 === controller.restoreButton }, "Restore All Defaults is in the loop")
+        // Open and Save: the .txt checkbox, then both pop-ups, then Restore
+        // All Defaults (and the tab strip, back to the checkbox).
         let txt = try XCTUnwrap(controller.checkboxes[.addExtensionToNewPlainTextFiles])
         XCTAssertTrue(txt.nextKeyView === controller.openEncodingPopUp)
         XCTAssertTrue(controller.openEncodingPopUp?.nextKeyView === controller.saveEncodingPopUp)
-        XCTAssertTrue(controller.saveEncodingPopUp?.nextKeyView === txt)
+        XCTAssertTrue(controller.saveEncodingPopUp?.nextKeyView === controller.restoreButton)
     }
 
     // MARK: Row 14: tests can use their own defaults
@@ -205,7 +209,7 @@ final class M6ReviewFixTests: XCTestCase {
         Defaults.store = suite
         defer {
             Defaults.store = previous
-            suite.removePersistentDomain(forName: name)
+            SavedSettings.deleteSuite(name)
         }
         let (controller, _) = try makeController()
         let box = try XCTUnwrap(controller.checkboxes[.smartDashes])

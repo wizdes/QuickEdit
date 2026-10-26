@@ -124,6 +124,14 @@ ui_tests_possible() {
 # container's tmp folder. Never the real app's container.
 DEBUG_BUNDLE_ID="dev.yili.QuickEdit.debug"
 DEBUG_CONTAINER="$HOME/Library/Containers/$DEBUG_BUNDLE_ID/Data"
+# bench/tests/build-sh-test.sh only: a stand-in container folder, so its
+# fake xcodebuild runs work whether or not this Mac has the real one.
+if [ -n "${QE_TEST_DEBUG_CONTAINER:-}" ]; then
+    case "$QE_TEST_DEBUG_CONTAINER" in
+        */Library/Containers/*) echo "QE_TEST_DEBUG_CONTAINER must not be a real container: $QE_TEST_DEBUG_CONTAINER" >&2; exit 1 ;;
+    esac
+    DEBUG_CONTAINER="$QE_TEST_DEBUG_CONTAINER"
+fi
 
 # macOS makes an app's container at its first launch. A fresh Mac has none,
 # so build the Debug app and start it once, then stop it.
@@ -189,6 +197,34 @@ make_fixtures() {
         >"$dir/restore/restore-1mb.txt"
 }
 
+# True when the test list $1 can run a UI test that opens the large outside
+# file: the full run (empty list), the whole UI target or SandboxUITests
+# class, or one of its large-file tests.
+needs_big_outside_file() {
+    local only="$1" target
+    [ -z "$only" ] && return 0
+    for target in $only; do
+        case "$target" in
+            QuickEditUITests|QuickEditUITests/SandboxUITests|QuickEditUITests/SandboxUITests/testLargeOutsideFile*) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+# Fixture and outside folders left by runs that ended over 2 hours ago (no
+# run lasts that long: QE_TEST_TIMEOUT is 20 minutes). Newer ones may belong
+# to a run in another clone, which shares the Debug app's container.
+remove_old_fixtures() {
+    local dir
+    for dir in "$DEBUG_CONTAINER/tmp/QuickEditUITestFixtures" "$BUILD/uitest-outside"; do
+        [ -d "$dir" ] || continue
+        find "$dir" -mindepth 1 -maxdepth 1 -type d -mmin +120 -print0 | while IFS= read -r -d '' old; do
+            chflags -R nouchg "$old" 2>/dev/null || true
+            rm -rf "$old" || echo "NOTE: could not remove the old fixture folder $old" >&2
+        done
+    done
+}
+
 # Locked fixtures (chflags uchg) cannot be deleted; unlock them after a run.
 unlock_fixtures() {
     chflags -R nouchg "$1" 2>/dev/null || true
@@ -222,6 +258,7 @@ run_tests() {
     # inside its own container. So the fixture files are made here, inside
     # the sandboxed Debug app's container, where the app may read and write.
     ensure_debug_container
+    remove_old_fixtures
     local fixtures="$DEBUG_CONTAINER/tmp/QuickEditUITestFixtures/$label-$stamp"
     make_fixtures "$fixtures"
     export TEST_RUNNER_QE_FIXTURES="$fixtures"
@@ -234,8 +271,16 @@ run_tests() {
     printf 'life\n' >"$outside/life.txt"
     printf 'caf\303\251\n' >"$outside/latin.txt"
     printf 'before\n' >"$outside/reload.txt"
-    # Over the 50 MB large-file limit, so QuickEdit clones it (M8 V3).
-    awk 'BEGIN { for (i = 0; i < 1400000; i++) printf "line %07d of the large outside file\n", i }' >"$outside/big.txt"
+    printf 'pdf source\n' >"$outside/pdf-source.txt"
+    printf 'not a pdf yet\n' >"$outside/existing.pdf"
+    printf 'extension\n' >"$outside/ext.txt"
+    printf 'v1\n' >"$outside/versions.txt"
+    printf 'old target\n' >"$outside/big-target.txt"
+    # Over the 50 MB large-file limit, so QuickEdit clones it (M8 V3). 55 MB,
+    # so only for runs that include a large-file UI test (sandbox review H).
+    if needs_big_outside_file "$only"; then
+        awk 'BEGIN { for (i = 0; i < 1400000; i++) printf "line %07d of the large outside file\n", i }' >"$outside/big.txt"
+    fi
     export TEST_RUNNER_QE_OUTSIDE="$outside"
     # Screenshots the unit tests draw (read by root): written in the
     # container, copied to build/shots after the run.
@@ -253,8 +298,9 @@ run_tests() {
         echo "xcodebuild test hit the ${QE_TEST_TIMEOUT:-1200} s limit and was stopped" >&2
     fi
     unlock_fixtures "$fixtures"
-    # The large outside file and its copy take about 110 MB per run.
-    rm -f "$outside/big.txt" "$outside/big-copy.txt"
+    # The large outside file and its copies take about 55 MB each per run;
+    # a copy saved with no extension is "big-copy".
+    rm -f "$outside/big.txt" "$outside/big-copy.txt" "$outside/big-copy" "$outside/big-target.txt"
     if [ -n "$(ls -A "$shots")" ]; then
         mkdir -p "$BUILD/shots"
         ditto "$shots" "$BUILD/shots"

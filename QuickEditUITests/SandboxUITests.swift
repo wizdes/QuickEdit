@@ -163,14 +163,18 @@ final class SandboxUITests: QuickEditUITestCase {
         XCTAssertEqual(window.textViews.firstMatch.value as? String, "caf\u{C3}\u{A9}\n")
     }
 
-    /// A large picked file outside the container is cloned into the app's
-    /// own temporary folder (M8 V3) and Save As writes all its bytes to a
-    /// new file next to it.
-    func testLargeOutsideFileIsClonedAndSavesAs() throws {
+    /// The read-only limit for the large-file tests: 50 MiB, so the 55 MB
+    /// big.txt opens read-only and Save As copies its clone
+    /// (TextDocument.originalForCopy), as a file over 512 MiB does.
+    private static let lowReadOnlyLimit = ["-QETestReadOnlyLimitBytes", String(50 * 1024 * 1024)]
+
+    /// Opens the large outside file read-only (lowered limit) and waits for
+    /// its clone in the app's own temporary folder (M8 V3).
+    private func openLargeOutsideFileReadOnly() throws -> URL {
         let url = try outsideFile("big.txt")
         let size = try XCTUnwrap(try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int)
         XCTAssertGreaterThan(size, 50 * 1024 * 1024)
-        launch()
+        launch(extraArguments: Self.lowReadOnlyLimit)
         _ = openInOpenPanel(url, timeout: 30)
         let originals = Self.debugContainerTmp.appendingPathComponent("QuickEdit-originals")
         waitUntil(10, "no clone of big.txt in \(originals.path)") {
@@ -178,13 +182,97 @@ final class SandboxUITests: QuickEditUITestCase {
             return folders.contains { FileManager.default.fileExists(
                 atPath: originals.appendingPathComponent($0).appendingPathComponent("big.txt").path) }
         }
-        safePress("s", [.command, .shift, .option]) // Save As… (Cmd+Shift+S is Duplicate)
-        fillSavePanel(name: "big-copy", folder: url.deletingLastPathComponent(), addTxtExtension: true)
-        let copy = url.deletingLastPathComponent().appendingPathComponent("big-copy.txt")
-        waitUntil(30, "big-copy.txt is not \(size) bytes") {
+        return url
+    }
+
+    /// Waits until `copy` has every byte of `original`, then compares all.
+    private func waitForSameBytes(_ copy: URL, as original: URL, timeout: TimeInterval = 30) throws {
+        let size = try XCTUnwrap(try? FileManager.default.attributesOfItem(atPath: original.path)[.size] as? Int)
+        waitUntil(timeout, "\(copy.lastPathComponent) is not \(size) bytes") {
             ((try? FileManager.default.attributesOfItem(atPath: copy.path))?[.size] as? Int) == size
         }
-        XCTAssertEqual(try Data(contentsOf: copy).prefix(64), try Data(contentsOf: url).prefix(64))
+        XCTAssertTrue(try Data(contentsOf: copy) == Data(contentsOf: original), "\(copy.lastPathComponent) differs from the original")
+    }
+
+    /// A large picked file outside the container is cloned into the app's
+    /// own temporary folder (M8 V3); read-only, Save As writes the clone's
+    /// bytes, all of them, to a new file next to it, and a second Save As
+    /// writes them over a file that is already there (after Replace). One
+    /// open for both: a second Open panel over the folder, with two 55 MB
+    /// files in it, once missed the file for over 30 s.
+    func testLargeOutsideFileIsClonedAndSavesAs() throws {
+        let url = try openLargeOutsideFileReadOnly()
+        safePress("s", [.command, .shift, .option]) // Save As… (Cmd+Shift+S is Duplicate)
+        fillSavePanel(name: "big-copy", folder: url.deletingLastPathComponent(), addTxtExtension: true)
+        try waitForSameBytes(url.deletingLastPathComponent().appendingPathComponent("big-copy.txt"), as: url)
+
+        let target = url.deletingLastPathComponent().appendingPathComponent("big-target.txt")
+        XCTAssertEqual(bytes(target), Array("old target\n".utf8))
+        safePress("s", [.command, .shift, .option])
+        fillSavePanel(name: "big-target", folder: url.deletingLastPathComponent(), addTxtExtension: true,
+                      replacing: true)
+        try waitForSameBytes(target, as: url)
+    }
+
+    /// Export as PDF over a PDF that is already there, in the outside folder.
+    func testOutsideFileExportsAPDFOverAnExistingPDF() throws {
+        let url = try outsideFile("pdf-source.txt")
+        let pdf = url.deletingLastPathComponent().appendingPathComponent("existing.pdf")
+        XCTAssertEqual(bytes(pdf), Array("not a pdf yet\n".utf8))
+        launch()
+        _ = openInOpenPanel(url)
+        chooseMenu("File", "Export as PDF\u{2026}")
+        fillSavePanel(name: "existing", folder: url.deletingLastPathComponent(), replacing: true)
+        waitUntil(15, "existing.pdf is not a PDF") {
+            (try? Data(contentsOf: pdf))?.starts(with: Array("%PDF".utf8)) ?? false
+        }
+    }
+
+    /// Save As with another extension, on a picked outside file: the new
+    /// file has the text, the old one keeps its bytes.
+    func testOutsideFileSavesAsWithAnotherExtension() throws {
+        let url = try outsideFile("ext.txt")
+        launch()
+        _ = openInOpenPanel(url)
+        safePress("s", [.command, .shift, .option])
+        fillSavePanel(name: "ext.md", folder: url.deletingLastPathComponent(), addTxtExtension: false)
+        // QuickEdit asks whether to keep ".md" or use ".txt" (TextEdit's question).
+        let keep = app.buttons.matching(NSPredicate(format: "title BEGINSWITH 'Use'")).matching(
+            NSPredicate(format: "title CONTAINS '.md'")).firstMatch
+        if keep.waitForExistence(timeout: 3) { keep.click() }
+        waitForBytes(url.deletingLastPathComponent().appendingPathComponent("ext.md"), Array("extension\n".utf8))
+        XCTAssertEqual(bytes(url), Array("extension\n".utf8))
+    }
+
+    /// Autosave writes a picked outside file, and an older version kept by
+    /// Versions can be read back (File > Revert To > Browse All Versions
+    /// is a full-screen UI; the test reads the version through Revert To's
+    /// "Last Saved" item instead, which comes from the same version store).
+    func testOutsideFileAutosavesAndAnOlderVersionComesBack() throws {
+        let url = try outsideFile("versions.txt")
+        launch()
+        _ = openInOpenPanel(url)
+        safePress(.downArrow, .command)
+        safeType("one")
+        safePress("s", .command)
+        waitForBytes(url, Array("v1\none".utf8))
+        safeType(" two")
+        // Autosave in place (QuickEdit's autosavesInPlace): the file gets the
+        // edit with no Save. Up to about 30 s on a loaded Mac.
+        waitForBytes(url, Array("v1\none two".utf8), timeout: 45)
+        app.menuBars.menuBarItems["File"].click()
+        let revertTo = app.menuBars.menuBarItems["File"].menuItems["Revert To"]
+        XCTAssertTrue(revertTo.waitForExistence(timeout: 5), "no Revert To submenu")
+        revertTo.hover()
+        let items = revertTo.menuItems.allElementsBoundByIndex.map(\.title)
+        let older = revertTo.menuItems.matching(NSPredicate(format: "title BEGINSWITH 'Last Opened' OR title BEGINSWITH 'Last Saved'")).firstMatch
+        XCTAssertTrue(older.waitForExistence(timeout: 5), "Revert To lists \(items)")
+        older.click()
+        let sheet = app.sheets.firstMatch
+        if sheet.waitForExistence(timeout: 2), sheet.buttons["Revert"].exists { sheet.buttons["Revert"].click() }
+        waitUntil(10, "no older version came back; text \(text.debugDescription), menu \(items)") {
+            self.text == "v1\none" || self.text == "v1\n"
+        }
     }
 
     /// The -QETestExternalWrite hook's /bin/sh runs inside the app's
@@ -192,14 +280,17 @@ final class SandboxUITests: QuickEditUITestCase {
     /// Open panel gave the app access, and the clean window reloads.
     func testOutsideFileReloadsAfterTheTestHooksWrite() throws {
         let url = try outsideFile("reload.txt")
+        // The access exists only once the Open panel has opened the file
+        // (31 s once in a loaded run). The hook writes 1 s after the window
+        // is open with its caret at the end (-QETestExternalWriteAfterCaretAtEnd),
+        // and the test moves the caret only after it read the old text.
         launch(extraArguments: ["-QETestExternalWrite", url.path, "-QETestExternalWriteText", "after\\n",
-                                "-QETestExternalWriteDelay", "40"])
-        // The write comes 40 s after launch: the access exists only once the
-        // Open panel has opened the file, which took 31 s in a loaded
-        // ./build.sh quick run (2026-10-25), so 20 s was too soon.
+                                "-QETestExternalWriteDelay", "1", "-QETestExternalWriteAfterCaretAtEnd", "YES"])
         let window = openInOpenPanel(url)
         XCTAssertEqual(window.textViews.firstMatch.value as? String, "before\n")
-        waitForBytes(url, Array("after\n".utf8), timeout: 45)
+        XCTAssertEqual(bytes(url), Array("before\n".utf8), "the hook wrote before the caret moved")
+        safePress(.downArrow, .command)
+        waitForBytes(url, Array("after\n".utf8), timeout: 15)
         waitUntil(6, "the window did not reload") {
             (window.textViews.firstMatch.value as? String) == "after\n"
         }

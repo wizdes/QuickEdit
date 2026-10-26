@@ -262,8 +262,18 @@ final class ShareMenuValidator: NSObject, NSMenuDelegate {
     /// True when `document` has a file to share.
     static func canShare(_ document: NSDocument?) -> Bool { document?.fileURL != nil }
 
+    /// The window in front, whose document Share would send. AppKit's main
+    /// window; tests replace it, because a unit-test host is not the
+    /// active app and has no main window (as LinePanelController does).
+    var frontWindow: @MainActor () -> NSWindow? = { NSApp.mainWindow }
+
+    /// The front window's document (NSDocumentController.currentDocument
+    /// is the main window's document too).
+    var frontDocument: NSDocument? {
+        frontWindow().flatMap { NSDocumentController.shared.document(for: $0) }
+    }
+
     func menuNeedsUpdate(_ menu: NSMenu) {
-        Self.shareItem(in: menu)?.isEnabled = Self.canShare(NSDocumentController.shared.currentDocument)
+        Self.shareItem(in: menu)?.isEnabled = Self.canShare(frontDocument)
     }
 }
-

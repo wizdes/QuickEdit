@@ -290,10 +290,37 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         let openAndSave: [NSView] = [checkboxes[.addExtensionToNewPlainTextFiles], openEncodingPopUp, saveEncodingPopUp]
             .compactMap { $0 }
         let keyboard = keyboardTab?.keyViews ?? []
-        for loop in [newDocument, openAndSave, keyboard] where !loop.isEmpty {
-            for (index, view) in loop.enumerated() { view.nextKeyView = loop[(index + 1) % loop.count] }
+        tabKeyLoops = [newDocument, openAndSave, keyboard]
+        // NSTabView puts the shown tab's loop between itself and its own
+        // next view: tab strip, the tab's controls, then Restore All
+        // Defaults, which leads back to the tab strip (M9 review row 4).
+        // Measured: with the tab's last control leading out of the tab,
+        // NSTabView points it back at the tab strip, and Restore All
+        // Defaults was never reached.
+        if let tabView, let restoreButton {
+            tabView.nextKeyView = restoreButton
+            restoreButton.nextKeyView = tabView
         }
+        for index in tabKeyLoops.indices { closeKeyLoop(throughRestoreButtonOf: index) }
         window.initialFirstResponder = widthField
+    }
+
+    /// The tab's loop, by tab index, without Restore All Defaults.
+    private var tabKeyLoops: [[NSView]] = []
+
+    /// Links one tab's controls in reading order, the last one to Restore
+    /// All Defaults, and names the first for NSTabView.
+    private func closeKeyLoop(throughRestoreButtonOf index: Int) {
+        guard let restoreButton, index >= 0, index < tabKeyLoops.count,
+              let first = tabKeyLoops[index].first else { return }
+        // First responder first: NSTabView relinks the loop then, and drops
+        // a control it thinks cannot take the focus (measured: Restore
+        // Keyboard Defaults); the links below are the final ones.
+        tabView?.tabViewItem(at: index).initialFirstResponder = first
+        let loop = tabKeyLoops[index]
+        for (position, view) in loop.enumerated() {
+            view.nextKeyView = position + 1 < loop.count ? loop[position + 1] : restoreButton
+        }
     }
 
     // MARK: Control builders
@@ -401,6 +428,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
     /// shortcut being recorded is dropped when the tab changes.
     func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) {
         keyboardTab?.endRecording()
+        closeKeyLoop(throughRestoreButtonOf: tabViewItem.map(tabView.indexOfTabViewItem) ?? -1)
         guard let window, let content = window.contentView else { return }
         let height = tabHeight(for: tabViewItem) + Layout.tabFrame.minY + Layout.tabTopMargin
         guard abs(content.frame.height - height) > 0.5 else { return }
@@ -621,6 +649,15 @@ final class KeyboardTabController: NSObject, NSTableViewDataSource, NSTableViewD
             : NSColor(white: 0, alpha: 0.62)
     }
 
+    /// Menu header rows. A group row swaps labelColor for
+    /// secondaryLabelColor, 3.9:1 on a light row (ContrastTests, U8); a
+    /// color of its own is kept: 85% black or white.
+    static let headerTextColor = NSColor(name: "QuickEditShortcutHeaderText") { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? NSColor(white: 1, alpha: 0.85)
+            : NSColor(white: 0, alpha: 0.85)
+    }
+
     // MARK: State
 
     /// The menu bar whose commands the tab lists and changes.
@@ -782,7 +819,7 @@ final class KeyboardTabController: NSObject, NSTableViewDataSource, NSTableViewD
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         switch rows[row] {
         case let .menu(title):
-            return label(title, font: Self.smallBoldFont, color: .labelColor, inset: Layout.nameInset)
+            return label(title, font: Self.smallBoldFont, color: Self.headerTextColor, inset: Layout.nameInset)
         case let .submenu(title):
             guard tableColumn?.identifier.rawValue == "Command" else { return nil }
             return label(title, font: Self.smallBoldFont, color: Self.dimTextColor, inset: Layout.subInset)
@@ -953,10 +990,19 @@ final class KeyboardTabController: NSObject, NSTableViewDataSource, NSTableViewD
         resetRow(index)
     }
 
-    /// Puts the command on `row` back to its default shortcut.
+    /// Puts the command on `row` back to its default shortcut, unless
+    /// another command has that key now: then the reset is refused with
+    /// the clash message, and both keys stay (M9 review row 1).
     func resetRow(_ row: Int) {
         guard let command = command(at: row), isChanged(command) else { return }
         if recordingID != nil { endRecording() }
+        if let refused = Shortcuts.resetRefusal(for: command, in: menuBar()) {
+            refusal = refused
+            updateMessage()
+            announce(refused.message)
+            return
+        }
+        refusal = nil
         Shortcuts.set(nil, for: command, applyingTo: menuBar())
         reload()
         announce("\(command.name) is back to its default shortcut \(command.defaultShortcut.display).")
@@ -964,6 +1010,7 @@ final class KeyboardTabController: NSObject, NSTableViewDataSource, NSTableViewD
 
     @objc func restoreKeyboardDefaults(_ sender: Any?) {
         if recordingID != nil { endRecording() }
+        refusal = nil
         Shortcuts.restoreDefaults(applyingTo: menuBar())
         reload()
         announce("Every keyboard shortcut is back to its default.")
@@ -974,13 +1021,14 @@ final class KeyboardTabController: NSObject, NSTableViewDataSource, NSTableViewD
         tableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integersIn: 0..<2))
     }
 
-    /// The line under the table: the refusal, or the hint while recording.
+    /// The line under the table: the refusal (of a recorded key or of a
+    /// reset), or the hint while recording.
     private func updateMessage() {
-        guard isRecording else {
-            messageField.stringValue = ""
-            return
-        }
         guard let refusal else {
+            guard isRecording else {
+                messageField.stringValue = ""
+                return
+            }
             messageField.attributedStringValue = NSAttributedString(string: Self.hintText, attributes: [
                 .font: Self.smallFont, .foregroundColor: Self.dimTextColor])
             return
