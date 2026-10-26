@@ -31,11 +31,15 @@ final class LayoutTests: QuickEditUITestCase {
     }
 
     /// Window > Merge All Windows puts both windows in one window as tabs.
+    /// The second window comes from Cmd+T and Move Tab to New Window, not
+    /// Cmd+N, so the system "Prefer tabs" setting cannot change it (M11).
     func testMergeAllWindowsMakesTabs() throws {
         launch()
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
-        safePress("n", .command)
-        waitUntil(10, "Cmd+N did not add a window") { self.app.windows.count == 2 }
+        safePress("t", .command)
+        waitUntil(10, "Cmd+T made no tab") { self.window.tabGroups.firstMatch.tabs.count == 2 }
+        chooseMenu("Window", "Move Tab to New Window")
+        waitUntil(10, "Move Tab to New Window did not make a second window") { self.app.windows.count == 2 }
         chooseMenu("Window", "Merge All Windows")
         waitUntil(10, "the windows did not merge") { self.app.windows.count == 1 }
         // macOS 27 reports each tab as a Tab element, not a radio button.

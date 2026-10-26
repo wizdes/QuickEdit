@@ -12,7 +12,7 @@ final class AboutPanelTests: XCTestCase {
 
     func testNameVersionAndBuildComeFromInfoPlist() {
         XCTAssertEqual(info["CFBundleName"] as? String, "QuickEdit")
-        XCTAssertEqual(info["CFBundleShortVersionString"] as? String, "1.0.1")
+        XCTAssertEqual(info["CFBundleShortVersionString"] as? String, "1.1.0")
         let build = info["CFBundleVersion"] as? String ?? ""
         XCTAssertFalse(build.isEmpty, "CFBundleVersion is empty")
         XCTAssertNotNil(Int(build), "CFBundleVersion is not a build number: \(build)")

@@ -106,6 +106,13 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
             #endif
         }
         recordViewSize()
+        // Windows join tabs (tabbingMode stays .automatic, so Cmd+N and
+        // opened files follow the system "Prefer tabs" setting); the tab
+        // bar shows at 2 or more tabs and hides at 1 (M11). Tracked after
+        // the frame is set: tracked before it, the new window stayed at the
+        // screen's corner in a full unit run (ReviewFixTests cascade test,
+        // 2026-10-26).
+        TabBarRule.shared.track(window)
 
         // Save the new selection and scroll place at the next state save.
         // invalidateRestorableState only marks the state dirty; AppKit
@@ -860,6 +867,19 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
         if window?.firstResponder === textView {
             LaunchStamp.firstWindowReady()
         }
+    }
+}
+
+// MARK: New Tab (M11)
+
+extension DocumentWindowController {
+    /// The tab bar's + button: a new untitled document as a tab of this
+    /// window (TabCommands.openNewTab). It also makes AppKit show the +
+    /// button. Nothing happens while the window shows a sheet or a Save
+    /// panel. File > New Tab goes through NewTabCommand instead.
+    override func newWindowForTab(_ sender: Any?) {
+        guard TabCommands.canAddTab(to: window) else { return }
+        TabCommands.openNewTab(in: window)
     }
 }
 

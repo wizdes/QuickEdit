@@ -35,7 +35,7 @@ final class ShortcutTests: XCTestCase {
     /// id must never change (a rename loses the user's shortcut).
     static let allIDs = [
         "app.about", "app.settings", "app.hide", "app.hideOthers", "app.showAll", "app.quit",
-        "file.new", "file.open", "file.close", "file.save", "file.duplicate", "file.saveAs",
+        "file.new", "file.newTab", "file.open", "file.close", "file.save", "file.duplicate", "file.saveAs",
         "file.rename", "file.moveTo", "file.saveAll", "file.revert", "file.exportPDF", "file.print",
         "edit.undo", "edit.redo", "edit.cut", "edit.copy", "edit.paste", "edit.delete", "edit.complete",
         "edit.selectAll",
@@ -48,13 +48,13 @@ final class ShortcutTests: XCTestCase {
         "speech.start", "speech.stop",
         "format.preventEditing", "format.wrapToPage",
         "view.actualSize", "view.zoomIn", "view.zoomOut", "view.fullScreen",
-        "window.minimize", "window.zoom", "window.bringAllToFront",
+        "window.minimize", "window.zoom", "window.previousTab", "window.nextTab", "window.bringAllToFront",
     ]
 
     func testEveryCommandHasAStableUniqueID() {
         let ids = Shortcuts.commandItems(in: MainMenu.build()).map(\.command.id)
         XCTAssertEqual(ids, Self.allIDs)
-        XCTAssertEqual(Set(ids).count, 58)
+        XCTAssertEqual(Set(ids).count, 61)
     }
 
     func testDefaultShortcutsAreTheMenusOwnKeys() {
@@ -74,7 +74,7 @@ final class ShortcutTests: XCTestCase {
         for id in Shortcuts.commandItems(in: live).map(\.command.id) where ids.last != id { ids.append(id) }
         XCTAssertEqual(ids, Self.allIDs)
         let rows = Shortcuts.rows(for: live).filter { if case .command = $0 { true } else { false } }
-        XCTAssertEqual(rows.count, 58, "one row per command in the live menu bar")
+        XCTAssertEqual(rows.count, 61, "one row per command in the live menu bar")
     }
 
     // MARK: 2. The store keeps changes only
@@ -375,11 +375,12 @@ final class ShortcutTests: XCTestCase {
         KeyboardTabController(menuBar: { menu })
     }
 
-    /// One flat table: 6 menu rows, 5 Edit submenu rows, 58 commands (69
-    /// rows; the mockup's 70 had Open Recent > Clear Menu, which AppKit owns).
+    /// One flat table: 6 menu rows, 5 Edit submenu rows, 61 commands (72
+    /// rows; M9 had 69 before M11's New Tab, Show Previous Tab and Show
+    /// Next Tab; the mockup's 70 had Open Recent > Clear Menu, which AppKit owns).
     func testTabListsEveryCommandUnderAHeaderRowPerMenu() throws {
         let tab = makeTab(MainMenu.build())
-        XCTAssertEqual(tab.rows.count, 69)
+        XCTAssertEqual(tab.rows.count, 72)
         let headers = tab.rows.compactMap { row -> String? in
             switch row {
             case let .menu(title): "menu " + title
@@ -394,7 +395,7 @@ final class ShortcutTests: XCTestCase {
             if case let .command(command, _) = row { command.name } else { nil }
         }
         XCTAssertFalse(names.contains("Clear Menu"))
-        XCTAssertEqual(tab.tableView.numberOfRows, 69)
+        XCTAssertEqual(tab.tableView.numberOfRows, 72)
         XCTAssertTrue(tab.tableView.delegate?.tableView?(tab.tableView, isGroupRow: 0) ?? false)
         XCTAssertFalse(tab.tableView.delegate?.tableView?(tab.tableView, shouldSelectRow: 0) ?? true)
     }
@@ -574,6 +575,94 @@ final class ShortcutTests: XCTestCase {
             try png.write(to: folder.appendingPathComponent("\(name).png"))
         }
         tab.endRecording()
+    }
+
+    // MARK: 9. Tab commands (M11)
+
+    /// New Tab, Show Previous Tab and Show Next Tab have stable ids and
+    /// their default keys, and a row each in the Keyboard tab.
+    func testTabCommandsHaveIDsDefaultKeysAndRows() throws {
+        let menu = MainMenu.build()
+        let expected: [(String, String, KeyShortcut, String)] = [
+            ("file.newTab", "New Tab", KeyShortcut("t", [.command]), "\u{2318}T"),
+            ("window.previousTab", "Show Previous Tab", KeyShortcut("\t", [.control, .shift]), "\u{2303}\u{21E7}\u{21E5}"),
+            ("window.nextTab", "Show Next Tab", KeyShortcut("\t", [.control]), "\u{2303}\u{21E5}"),
+        ]
+        let tab = makeTab(menu)
+        for (id, name, shortcut, display) in expected {
+            let (item, command) = try command(id, in: menu)
+            XCTAssertEqual(command.name, name)
+            XCTAssertEqual(command.defaultShortcut, shortcut, id)
+            XCTAssertEqual(KeyShortcut(of: item), shortcut, id)
+            XCTAssertEqual(shortcut.display, display, id)
+            XCTAssertNotNil(tab.row(of: id), "no Keyboard row for \(id)")
+            XCTAssertEqual((try shortcutButton(tab, id) as? NSButton)?.title, display, id)
+        }
+    }
+
+    /// Ctrl+Tab and Ctrl+Shift+Tab are recorded as Tab plus the modifiers
+    /// (key code 48), and they are neither keys macOS keeps nor
+    /// text-editing keys, so a command may have them.
+    func testRecorderTakesControlTabAndControlShiftTab() throws {
+        XCTAssertEqual(ShortcutRecorder.outcome(for: try key(48, "\t", [.control])),
+                       .candidate(KeyShortcut("\t", [.control])))
+        // Shift+Tab types a back-tab character (U+0019); the key is still Tab.
+        XCTAssertEqual(ShortcutRecorder.outcome(for: try key(48, "\u{19}", [.control, .shift])),
+                       .candidate(KeyShortcut("\t", [.control, .shift])))
+        let menu = MainMenu.build()
+        let (_, next) = try command("window.nextTab", in: menu)
+        let (_, previous) = try command("window.previousTab", in: menu)
+        XCTAssertNil(Shortcuts.refusal(for: KeyShortcut("\t", [.control]), command: next, in: menu))
+        XCTAssertNil(Shortcuts.refusal(for: KeyShortcut("\t", [.control, .shift]), command: previous, in: menu))
+        XCTAssertNil(Shortcuts.textEditingAction(for: KeyShortcut("\t", [.control])))
+        XCTAssertFalse(Shortcuts.systemReserved.contains { $0.matches(KeyShortcut("\t", [.control])) })
+        // Given to the other one, it clashes by name.
+        XCTAssertEqual(Shortcuts.refusal(for: KeyShortcut("\t", [.control]), command: previous, in: menu)?.message,
+                       "\u{2303}\u{21E5} is already used by \u{201C}Show Next Tab\u{201D} in the Window menu.")
+        // The Keyboard tab saves it.
+        let tab = makeTab(menu)
+        tab.startRecording("window.nextTab")
+        tab.handle(.candidate(KeyShortcut("\t", [.control, .option])))
+        XCTAssertEqual(KeyShortcut(of: try command("window.nextTab", in: menu).0), KeyShortcut("\t", [.control, .option]))
+    }
+
+    /// Updating from a version without tabs: a key the user already gave
+    /// another command (Cmd+T to Print, Ctrl+Tab to Minimize) stays with
+    /// it, and the new command gets no key. Its row is empty, and its
+    /// reset is refused with the clash message until the other command
+    /// lets go.
+    func testSavedKeyOnAnotherCommandWinsOverANewDefault() throws {
+        let command = NSEvent.ModifierFlags.command.rawValue
+        let control = NSEvent.ModifierFlags.control.rawValue
+        saved.store.set(["file.print": ["key": "t", "modifiers": Int(command)],
+                         "window.minimize": ["key": "\t", "modifiers": Int(control)]],
+                        forKey: Defaults.keyboardShortcutsKey)
+        let menu = MainMenu.build()
+        let (newTabItem, newTab) = try self.command("file.newTab", in: menu)
+        let (nextItem, _) = try self.command("window.nextTab", in: menu)
+        let (printItem, print) = try self.command("file.print", in: menu)
+        let (minimizeItem, _) = try self.command("window.minimize", in: menu)
+        XCTAssertTrue(KeyShortcut(of: newTabItem).isNone, "New Tab gets no key")
+        XCTAssertTrue(KeyShortcut(of: nextItem).isNone, "Show Next Tab gets no key")
+        XCTAssertEqual(KeyShortcut(of: printItem), KeyShortcut("t"))
+        XCTAssertEqual(KeyShortcut(of: minimizeItem), KeyShortcut("\t", [.control]))
+        XCTAssertEqual(KeyShortcut(of: try self.command("window.previousTab", in: menu).0),
+                       KeyShortcut("\t", [.control, .shift]), "a key nobody took stays")
+        XCTAssertEqual(Shortcuts.shortcut(for: newTab, overrides: Shortcuts.overrides()), .empty)
+
+        let tab = makeTab(menu)
+        XCTAssertEqual((try shortcutButton(tab, "file.newTab") as? NSButton)?.title, "")
+        let expected = "\u{2318}T is already used by \u{201C}Print\u{2026}\u{201D} in the File menu."
+        XCTAssertEqual(Shortcuts.resetRefusal(for: newTab, in: menu)?.message, expected)
+        tab.resetRow(try XCTUnwrap(tab.row(of: "file.newTab")))
+        XCTAssertEqual(tab.refusal?.message, expected)
+        XCTAssertTrue(KeyShortcut(of: newTabItem).isNone)
+        XCTAssertEqual(KeyShortcut(of: printItem), KeyShortcut("t"))
+
+        // Once Print lets go of Cmd+T, New Tab has it again.
+        Shortcuts.set(nil, for: print, applyingTo: menu)
+        XCTAssertEqual(KeyShortcut(of: newTabItem), KeyShortcut("t"))
+        XCTAssertEqual(KeyShortcut(of: printItem), KeyShortcut("p"))
     }
 }
 

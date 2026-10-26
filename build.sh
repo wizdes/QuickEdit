@@ -213,7 +213,7 @@ needs_big_outside_file() {
 }
 
 # Fixture and outside folders left by runs that ended over 2 hours ago (no
-# run lasts that long: QE_TEST_TIMEOUT is 20 minutes). Newer ones may belong
+# run lasts that long: QE_TEST_TIMEOUT is at most 40 minutes). Newer ones may belong
 # to a run in another clone, which shares the Debug app's container.
 remove_old_fixtures() {
     local dir
@@ -390,7 +390,7 @@ case "$cmd" in
         mkdir -p "$BUILD"
         run_shell_tests
         if ui_tests_possible; then
-            run_tests "" all
+            QE_TEST_TIMEOUT="${QE_TEST_TIMEOUT:-2400}" run_tests "" all
         else
             run_tests "QuickEditTests" unit
             die "UI tests not run (reason above), so ./build.sh test cannot pass"
@@ -479,6 +479,7 @@ case "$cmd" in
             FindAndLineTests/testTypingInFindBarFindsAMatch
             FindAndLineTests/testCopyPasteUndoRedoCutInTheKeyWindow
             WindowsAndMenusTests/testOpenRecentListsAnOpenedFile
+            TabUITests/testNewTabNextPreviousAndCloseTab
             SandboxUITests/testOutsideFilePickedInOpenPanelSavesAndReopensFromOpenRecent
             SandboxUITests/testOutsideFileSavesRevertsAndExportsAPDF"
         QUICK_UI_CLASSES="ShortcutUITests AccessibilityAuditTests"
@@ -515,7 +516,7 @@ case "$cmd" in
             trap 'echo "$SKIP_WARNING" >&2' EXIT
         else
             ui_tests_possible || die "UI tests cannot run here (reason above); refusing to package"
-            run_tests "" all
+            QE_TEST_TIMEOUT="${QE_TEST_TIMEOUT:-2400}" run_tests "" all
         fi
         release_build
         mkdir -p "$ROOT/builds"

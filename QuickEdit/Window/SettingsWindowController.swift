@@ -150,6 +150,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         window.identifier = Self.windowIdentifier
         window.restorationClass = SettingsWindowController.self
         window.isRestorable = true
+        // Settings never takes tabs (M11).
+        window.tabbingMode = .disallowed
         window.delegate = self
         window.center()
 
@@ -801,8 +803,12 @@ final class KeyboardTabController: NSObject, NSTableViewDataSource, NSTableViewD
         Shortcuts.shortcut(for: command, overrides: Shortcuts.overrides())
     }
 
+    /// Saved as a change, or left without its default key because another
+    /// command took that key first (M11 upgrade rule): either way the row
+    /// says "(changed)" and has a reset button.
     func isChanged(_ command: MenuCommand) -> Bool {
-        Shortcuts.overrides()[command.id] != nil
+        let overrides = Shortcuts.overrides()
+        return overrides[command.id] != nil || Shortcuts.shortcut(for: command, overrides: overrides) != command.defaultShortcut
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }

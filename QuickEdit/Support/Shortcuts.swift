@@ -265,9 +265,17 @@ enum Shortcuts {
         if let menu { apply(to: menu, store: store) }
     }
 
-    /// The shortcut `command` has with these changes.
+    /// The shortcut `command` has with these changes. A default key the
+    /// user already gave another command stays with that command, and this
+    /// one gets none (M11: a version that adds Cmd+T for New Tab must not
+    /// take it from a command the user set it on).
     static func shortcut(for command: MenuCommand, overrides: [String: KeyShortcut]) -> KeyShortcut {
-        overrides[command.id] ?? command.defaultShortcut
+        if let own = overrides[command.id] { return own }
+        let fallback = command.defaultShortcut
+        if !fallback.isNone, overrides.contains(where: { $0.key != command.id && $0.value.matches(fallback) }) {
+            return .empty
+        }
+        return fallback
     }
 
     // MARK: The menu bar
