@@ -927,6 +927,12 @@ final class TextDocument: NSDocument {
     private var savePanel: NSSavePanel?
     private var panelSession = SavePanelSession()
 
+    /// A Save panel (Save, Save As, Move To) or the PDF Save panel is open
+    /// on this document's window. In the sandbox these panels run in
+    /// another process, so the window's `attachedSheet` stays nil under
+    /// them (measured 2026-10-26); New Tab is off while this is true (M11).
+    var isShowingSavePanel: Bool { savePanel != nil || isPDFPanelOpen }
+
     /// Opens the panel's session; `runModalSavePanel` calls this, and a test
     /// can play a panel without showing one.
     func beginSavePanelSession() { panelSession.begin() }

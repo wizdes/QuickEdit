@@ -14,10 +14,14 @@ enum MainMenu {
         mainMenu.addItem(submenuItem(fileMenu()))
         mainMenu.addItem(submenuItem(editMenu()))
         mainMenu.addItem(submenuItem(formatMenu()))
-        mainMenu.addItem(submenuItem(viewMenu()))
+        let view = viewMenu()
+        mainMenu.addItem(submenuItem(view))
         let window = windowMenu()
         mainMenu.addItem(submenuItem(window))
         NSApp.windowsMenu = window
+        // AppKit adds its own tab items to these two menus; its duplicates
+        // of QuickEdit's and Show Tab Bar go (M11, TabBarRule.swift).
+        TabMenuCleaner.shared.install(on: [window, view])
         let help = NSMenu(title: "Help")
         mainMenu.addItem(submenuItem(help))
         NSApp.helpMenu = help
@@ -58,6 +62,12 @@ enum MainMenu {
         // turns it off for a document that has no file yet (P73).
         menu.delegate = ShareMenuValidator.shared
         menu.addItem(item(id: "file.new", "New", #selector(NSDocumentController.newDocument(_:)), "n"))
+        // The action the tab bar's + button sends (DocumentWindowController
+        // answers that). The menu item has its own target, which picks the
+        // document window (M11, TabBarRule.swift).
+        let newTab = item(id: "file.newTab", "New Tab", #selector(NSResponder.newWindowForTab(_:)), "t")
+        newTab.target = NewTabCommand.shared
+        menu.addItem(newTab)
         menu.addItem(item(id: "file.open", "Open\u{2026}", #selector(NSDocumentController.openDocument(_:)), "o"))
         let recent = NSMenu(title: "Open Recent")
         // AppKit rebuilds this menu and replaces Clear Menu with its own
@@ -78,6 +88,8 @@ enum MainMenu {
         }
         menu.addItem(submenuItem(recent))
         menu.addItem(.separator())
+        // The title is "Close Tab" while the window has two or more tabs
+        // (ShareMenuValidator.menuNeedsUpdate).
         menu.addItem(item(id: "file.close", "Close", #selector(NSWindow.performClose(_:)), "w"))
         menu.addItem(item(id: "file.save", "Save", #selector(NSDocument.save(_:)), "s"))
         menu.addItem(item(id: "file.duplicate", "Duplicate", #selector(NSDocument.duplicate(_:)), "s", [.command, .shift]))
@@ -214,6 +226,13 @@ enum MainMenu {
         menu.addItem(item(id: "window.minimize", "Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"))
         menu.addItem(item(id: "window.zoom", "Zoom", #selector(NSWindow.performZoom(_:))))
         menu.addItem(.separator())
+        // QuickEdit's own tab items, so their keys can change in Settings >
+        // Keyboard. NSWindow handles them and turns them off with one tab.
+        // AppKit adds Move Tab to New Window and Merge All Windows after them.
+        menu.addItem(item(id: "window.previousTab", "Show Previous Tab", #selector(NSWindow.selectPreviousTab(_:)), "\t",
+                          [.control, .shift]))
+        menu.addItem(item(id: "window.nextTab", "Show Next Tab", #selector(NSWindow.selectNextTab(_:)), "\t", [.control]))
+        menu.addItem(.separator())
         menu.addItem(item(id: "window.bringAllToFront", "Bring All to Front", #selector(NSApplication.arrangeInFront(_:))))
         return menu
     }
@@ -243,6 +262,9 @@ enum MainMenu {
     }
 }
 
+/// The File menu's delegate. It also sets Close's title: "Close Tab"
+/// while the window Cmd+W would close has two or more tabs (M11).
+///
 /// File > Share (P73). AppKit inserts the Share submenu into the File menu
 /// by itself, built from NSSharingService for the current document's file
 /// (NSDocumentController.allowsAutomaticShareMenu). It is turned off here
@@ -273,7 +295,12 @@ final class ShareMenuValidator: NSObject, NSMenuDelegate {
         frontWindow().flatMap { NSDocumentController.shared.document(for: $0) }
     }
 
+    /// The window Close would close; tests replace it, as `frontWindow`.
+    var closeTarget: @MainActor () -> NSWindow? = { TabCommands.closeTarget() }
+
     func menuNeedsUpdate(_ menu: NSMenu) {
         Self.shareItem(in: menu)?.isEnabled = Self.canShare(frontDocument)
+        let close = menu.items.first { ($0.representedObject as? MenuCommand)?.id == "file.close" }
+        close?.title = TabCommands.closeTitle(for: closeTarget())
     }
 }

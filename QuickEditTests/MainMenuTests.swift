@@ -174,6 +174,7 @@ final class MainMenuTests: XCTestCase {
         }
         XCTAssertEqual(rows, [
             "New|Cmd+n|newDocument:",
+            "New Tab|Cmd+t|newWindowForTab:",  // M11
             "Open\u{2026}|Cmd+o|openDocument:",
             "Open Recent||submenu",
             "----",

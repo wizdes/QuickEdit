@@ -33,6 +33,18 @@ The app and the DMG are signed with a Developer ID and notarized by Apple, so ma
 - No AppleScript support, and no Services of its own (the Services menu that macOS adds still works).
 - No real printing; see the note on Print above.
 
+## Tabs
+
+A window can hold several documents as tabs.
+
+- File > New Tab (Cmd+T) opens a new untitled document in a tab of the front window. The + button in the tab bar does the same.
+- File > Close Tab (Cmd+W) closes only the tab you are in. When one tab is left, the item is called Close again, and the last Cmd+W closes the window.
+- Window > Show Next Tab (Ctrl+Tab) and Show Previous Tab (Ctrl+Shift+Tab) move between tabs. They wrap around at the ends.
+- The tab bar shows when a window has two or more tabs, and hides again at one.
+- Window > Merge All Windows puts every window into one as tabs. Window > Move Tab to New Window takes a tab back out.
+
+New (Cmd+N) and opening a file follow the "Prefer tabs" setting in System Settings > Desktop & Dock. The three tab keys can be changed in Settings > Keyboard, like any other command. If you already gave Cmd+T, Ctrl+Tab or Ctrl+Shift+Tab to another command, that command keeps it and the tab command starts with no key.
+
 ## Keyboard shortcuts
 
 Every menu command can have its own shortcut. Open QuickEdit > Settings > Keyboard:
