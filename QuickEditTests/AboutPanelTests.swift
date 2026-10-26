@@ -12,7 +12,7 @@ final class AboutPanelTests: XCTestCase {
 
     func testNameVersionAndBuildComeFromInfoPlist() {
         XCTAssertEqual(info["CFBundleName"] as? String, "QuickEdit")
-        XCTAssertEqual(info["CFBundleShortVersionString"] as? String, "1.0")
+        XCTAssertEqual(info["CFBundleShortVersionString"] as? String, "1.0.1")
         let build = info["CFBundleVersion"] as? String ?? ""
         XCTAssertFalse(build.isEmpty, "CFBundleVersion is empty")
         XCTAssertNotNil(Int(build), "CFBundleVersion is not a build number: \(build)")
@@ -27,6 +27,6 @@ final class AboutPanelTests: XCTestCase {
                                 "Credits.rtf is not in the app bundle")
         let credits = try NSAttributedString(url: url, options: [:], documentAttributes: nil)
         XCTAssertEqual(credits.string.trimmingCharacters(in: .whitespacesAndNewlines),
-                       "A fast plain-text editor, rebuilt from Apple's TextEdit sample.")
+                       "A fast plain-text editor for macOS.")
     }
 }
