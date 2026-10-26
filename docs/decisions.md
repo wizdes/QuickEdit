@@ -4,6 +4,7 @@ Critical questions go to Astra and Fable. The option with the most votes wins; r
 
 ## User decisions
 
+- U12 (2026-10-25, user): skip the M10 review; root checks the builder's work and goes straight to the final run.
 - U11 (2026-10-25, user): run as few tests as possible until the very end. Builders and fixes run only the unit tests for what they change. One full `./build.sh test`, one `./build.sh speed` and one notarized DMG come at the end of M10, covering M9 and M10 together; there is no separate M9 release run.
 - U10 (2026-10-25, root under U9): `PrintTests.testTenMegabyteExportInWrapToPageStaysUnderTwiceTheText` checks its 2x memory limit only in the optimized speed run, like its Wrap to Window sister. Debug values: +16 and +19 MB with the sandbox off, +52 MB with it on (limit 40 MB). The release speed run decides whether the sandbox breaks the real limit.
 - U9 (2026-10-25, user): for major changes and test changes, do not wait on the user; take root's recommendation, record it here, and continue.
