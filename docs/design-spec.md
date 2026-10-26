@@ -44,7 +44,7 @@ All run from the repo root. Each prints its result and exits non-zero on failure
 - `./build.sh` : `xcodegen generate` then a Release build to `build/Release/QuickEdit.app`. Signs with `Developer ID Application: Yi Li (8Q5V8XK85Y)` when the keychain is open, else ad-hoc (`-`) and prints `SIGNING: ad-hoc (keychain locked)`.
 - `./build.sh test` : Debug build plus `xcodebuild test` for `QuickEditTests` and `QuickEditUITests`. Prints the executed count; zero tests executed, any skipped test, or any retry counts as failure (exit 1). Use `-derivedDataPath build/DerivedData` and `-scheme QuickEdit`.
 - `./build.sh unit` : only `QuickEditTests` (no UI, works with the screen locked).
-- `./build.sh dist M<n>` : `./build.sh`, then `ditto -c -k --keepParent` to `builds/QuickEdit-M<n>.zip`; then notarize with `xcrun notarytool submit --wait --keychain-profile fastpad-notary` and `xcrun stapler staple` if the keychain is open, else prints `NOTARIZE: skipped (keychain locked)`.
+- `./build.sh dist <name> [--skip-tests]` : the full tests (unless `--skip-tests`), `./build.sh`, then `scripts/make-dmg.sh` makes `builds/QuickEdit-<name>.dmg` (the app and the DMG signed, notarized with profile `fastpad-notary` and stapled when the keychain is open; a UDZO DMG with an Applications link, mounted read-only to check; never a zip). Keychain locked: an unsigned DMG and `NOTARIZE: skipped (keychain locked)`.
 - `bench/run-bench.sh [runs]` : launch race, QuickEdit vs `/System/Applications/TextEdit.app` (and `build/reference/TextEditReference.app` when present), interleaved, 2 warm-ups, default 5 runs, CSV to `build/bench-<time>/results.csv`.
 - `reference/build-reference.sh` : section 6.
 

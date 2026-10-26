@@ -42,6 +42,7 @@ else
     fail "dist --skip-tests last line is: $last (exit $status)"
 fi
 [ ! -e "$ROOT/builds/QuickEdit-M99.zip" ] || fail "a zip was made"
+[ ! -e "$ROOT/builds/QuickEdit-M99.dmg" ] || fail "a DMG was made"
 
 # 3. `unit` and `test` run the shell tests (M2 review row 7) and fail when one
 #    fails, before any Xcode work. QE_SHELL_TESTS_DIR points them at a folder

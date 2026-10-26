@@ -12,9 +12,10 @@
 #                                     read-only and 512 MB editable, each with no main-thread block
 #                                     over 200 ms and a peak under 1.5 GB, and a 1 GB reload within the
 #                                     same limits: needs about 2 GB free disk)
-#   ./build.sh dist M<n> [--skip-tests]
-#                                     full tests, then Release build, zip to builds/QuickEdit-M<n>.zip,
-#                                     notarize when the keychain is open
+#   ./build.sh dist <name> [--skip-tests]
+#                                     full tests, then Release build, DMG to builds/QuickEdit-<name>.dmg
+#                                     (scripts/make-dmg.sh: the app and the DMG notarized and stapled
+#                                     when the keychain is open; never a zip)
 # Every command prints its result and exits non-zero on failure.
 set -euo pipefail
 
@@ -505,8 +506,8 @@ case "$cmd" in
         run_tests "$*" only
         ;;
     dist)
-        milestone="${2:-}"
-        [[ "$milestone" =~ ^M[0-9]+$ ]] || die "usage: ./build.sh dist M<n> [--skip-tests]"
+        name="${2:-}"
+        [[ "$name" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]] || die "usage: ./build.sh dist <name> [--skip-tests] (for example 1.0)"
         if [ "${3:-}" = "--skip-tests" ]; then
             SKIP_WARNING="WARNING: --skip-tests given; packaging WITHOUT running the tests (root use only)"
             echo "$SKIP_WARNING" >&2
@@ -518,21 +519,22 @@ case "$cmd" in
         fi
         release_build
         mkdir -p "$ROOT/builds"
-        zip="$ROOT/builds/QuickEdit-$milestone.zip"
-        rm -f "$zip"
-        ditto -c -k --keepParent "$APP" "$zip" || die "zip"
+        dmg="$ROOT/builds/QuickEdit-$name.dmg"
+        # Releases are DMGs (M10 n3). A zip of the same name from an older
+        # dist run would make make-dmg.sh's zip guard fail, so it goes first.
+        rm -f "$ROOT/builds/QuickEdit-$name.zip"
+        dmg_flags=()
         if [ "$SIGNED_DEVID" -eq 1 ]; then
-            xcrun notarytool submit "$zip" --wait --keychain-profile "$NOTARY_PROFILE" || die "notarize"
-            xcrun stapler staple "$APP" || die "staple"
-            rm -f "$zip"
-            ditto -c -k --keepParent "$APP" "$zip" || die "zip after staple"
-            echo "NOTARIZE: done"
+            echo "NOTARIZE: the app and the DMG (profile $NOTARY_PROFILE)"
         else
-            echo "NOTARIZE: skipped (keychain locked)"
+            dmg_flags=(--no-notarize)
+            echo "NOTARIZE: skipped (keychain locked); the DMG is not signed"
         fi
-        echo "dist: $zip ($(stat -f %z "$zip") bytes)"
+        QE_DEVID="$DEVID" NOTARY_PROFILE="$NOTARY_PROFILE" \
+            "$ROOT/scripts/make-dmg.sh" "$APP" "$dmg" ${dmg_flags[@]+"${dmg_flags[@]}"} || die "make-dmg.sh"
+        echo "dist: $dmg ($(stat -f %z "$dmg") bytes)"
         ;;
     *)
-        die "unknown command '$cmd' (use: release, test, unit, speed, dist M<n>)"
+        die "unknown command '$cmd' (use: release, test, unit, quick, only, speed, dist <name>)"
         ;;
 esac
