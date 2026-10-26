@@ -14,7 +14,7 @@ settings:
     SWIFT_VERSION: "6.0"            # Swift 6 language mode
     SWIFT_STRICT_CONCURRENCY: complete
     MACOSX_DEPLOYMENT_TARGET: "27.0"
-    MARKETING_VERSION: "1.0"        # the M10 release
+    MARKETING_VERSION: "1.0.1"      # About box credit without TextEdit
     CURRENT_PROJECT_VERSION: "1"    # build.sh passes the commit count
     DEVELOPMENT_TEAM: 8Q5V8XK85Y
     CODE_SIGN_STYLE: Manual
