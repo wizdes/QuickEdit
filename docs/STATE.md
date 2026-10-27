@@ -1,13 +1,21 @@
 # QuickEdit state
 
-Rewritten at each milestone, never appended. Last rewrite: 2026-10-26, M11 (window tabs) done, version 1.1.0.
+Rewritten at each milestone, never appended. Last rewrite: 2026-10-26, version 1.2.0.
 
-Milestone: M11 (window tabs, docs/plans/M11.md) done. Next: the POST_MVP.md list and the follow-ups below, only when the user asks.
+Milestone: 1.2.0 (six user asks: blank untitled close, Sublime-like defaults with a line-number gutter, document map, Settings cleanup, new tab without the swap, Ctrl+1 to Ctrl+9) done. Plan: ~/.claude/plans/a-bunch-of-things-lucky-parasol.md. Next: the POST_MVP.md list, only when the user asks.
 Branch / worktree / commit: dev is merged into main at each release. Work continues on dev (worktrees/dev).
 Unmerged work: none.
-Releases: 1.0 (2026-10-25); 1.0.1 (2026-10-26: About credit and README, repo made public, page at https://yili.dev/projects/quickedit/); 1.1.0 (2026-10-26: tabs).
+Releases: 1.0 (2026-10-25); 1.0.1 (2026-10-26: About credit and README, repo made public, page at https://yili.dev/projects/quickedit/); 1.1.0 (2026-10-26: tabs); 1.2.0 (2026-10-26, tag on 05f87ca, DMG SHA-256 d69d92a2...6b51).
 
-M11 checks:
+1.2.0 checks:
+- Builder: a native Opus builder (the runner sandbox cannot run Xcode), two fix rounds.
+- Reviews: Astra twice (qe-12-review-astra, qe-12-review2-astra). Accepted: reload race with the line index, index memory on huge files (gutter now off over 50 MB like the map), edit cost, map drag, gutter width, speed limits, quit tests, a paused-index reader. Rejected: whitespace-only untitled text over 1 MB still asks (the scan cap keeps Close fast).
+- Also fixed: a 1.1.0 relaunch crash (AppKit restores an autosaved untitled document on a background thread and called the main-thread updateChangeCount override).
+- Full run at the release: 569 of 570; the speech test fails on 1.1.0 too (POST_MVP.md). Packaged with --skip-tests on the same tree.
+- Choices to check: Ctrl (not Cmd) for tab numbers; gutter and map on by default, toggled from the View menu; Paper size key kept (region default); Edit > Substitutions > Data Detectors item kept per window; an untouched empty untitled window is not restored at relaunch; Wrap to Page typing is slower at the 13 pt default (p95 9.3 ms Debug, optimized not measured).
+- Follow-ups: the optimized speed run (`./build.sh speed`) was not run; new-tab frame check is a bench script (bench/newtab-xcresult-frames.sh) because this terminal cannot record the screen; page screenshots still show 1.1.0 without the gutter and map.
+
+Earlier, M11 checks:
 - Builder: a native Opus builder. It ran `./build.sh quick` (460 of 460) and the tab UI tests.
 - Review: Astra (runner task qe-m11-review-astra). It found no app bug and 2 test gaps; both are fixed (Cmd+N tests no longer depend on the "Prefer tabs" setting; a large-file title test inside a tab).
 - Full suite at the release: shell 5 of 5, unit 447 of 447, UI 64 of 64. The `./build.sh test` run hit its old 1,200 s limit after 47 UI tests had passed. The 17 UI tests it did not reach then passed in one `./build.sh only` run. The full-run limit is now 2,400 s.
