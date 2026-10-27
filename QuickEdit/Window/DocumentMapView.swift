@@ -8,6 +8,11 @@ import AppKit
 /// lines on screen. When the text has more rows than the map, the map
 /// scrolls along with the text, in proportion. A click or drag scrolls the
 /// text: a click centers the clicked line; dragging the box moves it.
+///
+/// 1.2.1: the box is hidden until the mouse comes within `hoverMargin`
+/// points of the map (the container tracks that area for the map), and
+/// fades in and out; it stays while a drag in the map goes on. No line
+/// separates the map from the text any more.
 final class DocumentMapView: NSView {
     static let width: CGFloat = 100
     static let rowHeight: CGFloat = 2
@@ -17,13 +22,58 @@ final class DocumentMapView: NSView {
     /// While typing, the rows are redrawn at most this often; the box
     /// follows scrolling at once.
     static let editRedrawDelay: TimeInterval = 0.1
+    /// How far left of the map the mouse shows the box (1.2.1).
+    static let hoverMargin: CGFloat = 8
+    /// The box's fades (1.2.1), for a full 0 to 1 change; a fade that
+    /// starts part way takes its share of the time.
+    static let fadeInDuration: CFTimeInterval = 0.15
+    static let fadeOutDuration: CFTimeInterval = 0.25
+
+    /// Where the pointer is, in the window's coordinates, read when no
+    /// event says (1.2.1 review): at mouse up and when the tracking area
+    /// is made again. Tests replace it.
+    static var pointerInWindow: @MainActor (NSWindow) -> NSPoint = { $0.mouseLocationOutsideOfEventStream }
+
+    /// System Settings > Accessibility > Reduce Motion; tests replace it.
+    static var reducesMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+
+    /// The area that shows the box (1.2.1): the map and `hoverMargin`
+    /// points to its left, over the text's right edge. In the frame's
+    /// coordinates.
+    static func hoverRect(mapFrame: NSRect) -> NSRect {
+        NSRect(x: mapFrame.minX - hoverMargin, y: mapFrame.minY,
+               width: mapFrame.width + hoverMargin, height: mapFrame.height)
+    }
 
     /// The text view the map shows (the window's first view).
     weak var textView: NSTextView?
     let lineIndex: LineIndex
     private var editRedrawPending = false
     /// Where in the box the drag holds it, in points from its top.
-    private var dragOffset: CGFloat?
+    private var dragOffset: CGFloat? {
+        didSet { if (oldValue == nil) != (dragOffset == nil) { boxVisibilityChanged() } }
+    }
+
+    // MARK: The box's fade (1.2.1)
+
+    /// True while the mouse is in `hoverRect` (the container's tracking
+    /// area sends mouseEntered and mouseExited here).
+    private(set) var isMouseNear = false {
+        didSet { if oldValue != isMouseNear { boxVisibilityChanged() } }
+    }
+    /// True from mouse down to mouse up in the map.
+    var isDragging: Bool { dragOffset != nil }
+    /// The box should show: the mouse is near, or a drag goes on.
+    var showsViewportBox: Bool { isMouseNear || isDragging }
+    /// How much of the box is drawn now, 0 (none) to 1.
+    private(set) var boxAlpha: CGFloat = 0
+    /// When the fade now running started, and the alpha it started from.
+    private(set) var fadeStart: CFTimeInterval = 0
+    private var fadeFrom: CGFloat = 0
+    /// Drives a fade frame by frame; nil while idle, so nothing runs then.
+    private var fadeLink: CADisplayLink?
+    /// True while a fade runs.
+    var isFading: Bool { fadeLink != nil }
 
     init(lineIndex: LineIndex) {
         self.lineIndex = lineIndex
@@ -104,22 +154,112 @@ final class DocumentMapView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         drawCount += 1
         let dirty = dirtyRect.intersection(bounds)
+        // The map's background is the text's, with no separator line
+        // between them (1.2.1).
         NSColor.textBackgroundColor.setFill()
         dirty.fill()
-        NSColor.separatorColor.setFill()
-        NSRect(x: 0, y: dirty.minY, width: 1, height: dirty.height).fill()
         guard let geometry = currentGeometry(), let storage = textView?.textStorage,
               let context = NSGraphicsContext.current?.cgContext else { return }
         let rects = blockRects(geometry: geometry, string: storage.string as NSString)
         NSColor.textColor.withAlphaComponent(0.45).setFill()
         context.fill(rects)
+        // The box only while hovered or dragged, faded by boxAlpha (1.2.1).
+        guard boxAlpha > 0 else { return }
         let box = geometry.box(width: bounds.width)
-        NSColor.labelColor.withAlphaComponent(0.10).setFill()
+        NSColor.labelColor.withAlphaComponent(0.10 * boxAlpha).setFill()
         box.fill()
-        NSColor.labelColor.withAlphaComponent(0.22).setStroke()
+        NSColor.labelColor.withAlphaComponent(0.22 * boxAlpha).setStroke()
         let outline = NSBezierPath(rect: box.insetBy(dx: 0.5, dy: 0.5))
         outline.lineWidth = 1
         outline.stroke()
+    }
+
+    // MARK: Hover and fade (1.2.1)
+
+    override func mouseEntered(with event: NSEvent) { isMouseNear = true }
+
+    override func mouseExited(with event: NSEvent) { isMouseNear = false }
+
+    /// The map was hidden, left its window, or its tracking area went
+    /// away: the mouse is no longer near it and the box goes at once. The
+    /// display link is stopped here too: it holds the map, and a view's
+    /// link stops firing off screen, so a fade cut short by a closing
+    /// window would keep the map, its line index and the text alive
+    /// (1.2.1 review).
+    func resetHover() {
+        isMouseNear = false
+        stopFade()
+        boxAlpha = showsViewportBox ? 1 : 0
+    }
+
+    private func stopFade() {
+        fadeLink?.invalidate()
+        fadeLink = nil
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        if newWindow == nil { resetHover() }
+    }
+
+    /// Whether the pointer is in the hover area now, read from the window
+    /// rather than an event (1.2.1 review): a drag that ends outside may
+    /// bring no mouseExited.
+    func resampleHover() {
+        guard !isHidden, let window, let container = superview else {
+            isMouseNear = false
+            return
+        }
+        let point = container.convert(Self.pointerInWindow(window), from: nil)
+        isMouseNear = Self.hoverRect(mapFrame: frame).contains(point)
+    }
+
+    /// Starts a fade toward the box's new target from where it is now. A
+    /// hidden map, one off screen, or Reduce Motion jumps straight there.
+    private func boxVisibilityChanged() {
+        let target: CGFloat = showsViewportBox ? 1 : 0
+        fadeFrom = boxAlpha
+        fadeStart = CACurrentMediaTime()
+        guard boxAlpha != target else {
+            stopFade()
+            return
+        }
+        if isHidden || window == nil || Self.reducesMotion() {
+            stopFade()
+            boxAlpha = target
+            needsDisplay = true
+            return
+        }
+        if fadeLink == nil {
+            let link = displayLink(target: self, selector: #selector(fadeFrame(_:)))
+            link.add(to: .main, forMode: .common)
+            fadeLink = link
+        }
+    }
+
+    @objc private func fadeFrame(_ link: CADisplayLink) {
+        stepFade(at: CACurrentMediaTime())
+    }
+
+    /// Moves the fade to time `now` and redraws the box's area; stops the
+    /// display link once the box reaches its target.
+    func stepFade(at now: CFTimeInterval) {
+        let target: CGFloat = showsViewportBox ? 1 : 0
+        let duration = (target > fadeFrom ? Self.fadeInDuration : Self.fadeOutDuration) * Double(abs(target - fadeFrom))
+        var progress = duration > 0 ? min(1, max(0, (now - fadeStart) / duration)) : 1
+        // `fadeStart + d - fadeStart` can come out a hair under `d`.
+        if progress > 0.999 { progress = 1 }
+        boxAlpha = fadeFrom + (target - fadeFrom) * CGFloat(progress)
+        if progress >= 1 {
+            boxAlpha = target
+            fadeLink?.invalidate()
+            fadeLink = nil
+        }
+        if let geometry = currentGeometry() {
+            setNeedsDisplay(geometry.box(width: bounds.width).insetBy(dx: 0, dy: -1).intersection(bounds))
+        } else {
+            needsDisplay = true
+        }
     }
 
     /// The blocks of the rows the map shows. Each row reads at most as
@@ -211,6 +351,9 @@ final class DocumentMapView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        // Where the pointer is first, so a drag that ended outside the
+        // area does not flash the box back on (1.2.1 review).
+        resampleHover()
         dragOffset = nil
     }
 
@@ -300,5 +443,32 @@ final class DocumentContainerView: NSView {
         scrollView.frame = NSRect(x: 0, y: 0, width: max(0, bounds.width - mapWidth), height: bounds.height)
         documentMap.frame = NSRect(x: bounds.width - DocumentMapView.width, y: 0,
                                    width: DocumentMapView.width, height: bounds.height)
+        updateTrackingAreas()
+    }
+
+    /// The area near the map that shows its box (1.2.1). It reaches over
+    /// the text's right edge, so it lives here, not on the map.
+    private var mapTrackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        let rect = DocumentMapView.hoverRect(mapFrame: documentMap.frame)
+        if let area = mapTrackingArea, !documentMap.isHidden, area.rect == rect { return }
+        if let area = mapTrackingArea {
+            removeTrackingArea(area)
+            mapTrackingArea = nil
+        }
+        guard !documentMap.isHidden else {
+            documentMap.resetHover()
+            return
+        }
+        // During a drag too, so leaving the area with the button down
+        // still sends mouseExited (1.2.1 review).
+        let area = NSTrackingArea(rect: rect, options: [.mouseEnteredAndExited, .activeAlways, .enabledDuringMouseDrag],
+                                  owner: documentMap, userInfo: nil)
+        addTrackingArea(area)
+        mapTrackingArea = area
+        // A new area sends no entered event for a pointer already inside.
+        documentMap.resampleHover()
     }
 }

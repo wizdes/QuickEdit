@@ -139,7 +139,7 @@ enum TextViewFactory {
         textView.usesFindBar = true
         textView.isIncrementalSearchingEnabled = true
         textView.isAutomaticLinkDetectionEnabled = false
-        setWritingTools(on: true, textView)
+        setWritingTools(on: Defaults.store.bool(forKey: Defaults.showWritingToolsKey), textView)
 
         // Spelling and substitutions from Defaults (reference/apple/DocumentWindowController.m:187-198).
         textView.isContinuousSpellCheckingEnabled = Defaults.bool(.checkSpellingWhileTyping)
@@ -155,15 +155,21 @@ enum TextViewFactory {
         textView.isAutomaticTextReplacementEnabled = Defaults.bool(.textReplacement)
     }
 
-    /// Writing Tools (P73): on, with plain-text results only, so a rewrite
+    /// Writing Tools (P73), with plain-text results only, so a rewrite
     /// never brings in fonts, lists or tables. Off for a file too large to
     /// edit (M8, V3). Drags in and out of the view are plain text already:
     /// a plain view (`isRichText = false`, `importsGraphics = false`) reads
     /// and writes only strings, and a dropped file becomes its path.
+    /// Since 1.2.1 they follow Settings (`Defaults.showWritingToolsKey`,
+    /// off by default), and inline predictive text (the grey completions
+    /// while typing) goes with them. `isAutomaticTextCompletionEnabled` is
+    /// left alone: it only feeds the Touch Bar's candidate list
+    /// (NSTextView.h, NSTextView_TouchBar).
     @MainActor
     static func setWritingTools(on: Bool, _ textView: NSTextView) {
         textView.writingToolsBehavior = on ? .default : .none
         textView.allowedWritingToolsResultOptions = [.plainText]
+        textView.inlinePredictionType = on ? .default : .no
     }
 
     /// Large-file mode (M8 n2): every check that works on the text while

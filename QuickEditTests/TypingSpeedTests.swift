@@ -128,6 +128,11 @@ final class TypingSpeedTests: XCTestCase {
     /// on there since 1.2.0). Prints an M12-TYPING line; the same file with
     /// the gutter and the map off follows, so the two can be compared.
     func testTypingAtTheEndOf10MBDefaultView() throws {
+        // Line numbers are off by default since 1.2.1; this measures the
+        // 1.2.0 view with them on, the slower case.
+        let saved = SavedSettings()
+        defer { saved.restore() }
+        Defaults.store.set(true, forKey: Defaults.showLineNumbersKey)
         var gutter = false, map = false
         let run = try typeAtEnd(megabytes: 10, keys: 200) { controller in
             gutter = controller.scrollView.rulersVisible
@@ -159,6 +164,9 @@ final class TypingSpeedTests: XCTestCase {
     /// inserts a line start before about 3.2 million others. Limit in an
     /// optimized build: p95 at most 8 ms, as the other typing tests.
     func testReturnNearTheStartOf49MBIndexed() throws {
+        let saved = SavedSettings()
+        defer { saved.restore() }
+        Defaults.store.set(true, forKey: Defaults.showLineNumbersKey)  // off by default since 1.2.1
         var starts = 0, gutter = false
         let data = shortLines(bytes: 49 * 1024 * 1024)
         let run = try typeAtEnd(megabytes: 49, keys: 200, data: data, at: 100, key: "\n") { controller in
@@ -179,6 +187,9 @@ final class TypingSpeedTests: XCTestCase {
     /// display, three times in fresh windows. Limit in an optimized build:
     /// at most 200 ms, the main-thread limit of the large-file tests.
     func testPasting10MBIntoAnEmptyDocument() throws {
+        let saved = SavedSettings()
+        defer { saved.restore() }
+        Defaults.store.set(true, forKey: Defaults.showLineNumbersKey)  // off by default since 1.2.1
         let text = String(decoding: fixtureData(bytes: 10 * 1024 * 1024), as: UTF8.self)
         var totals: [Double] = [], edits: [Double] = []
         for _ in 0..<3 {

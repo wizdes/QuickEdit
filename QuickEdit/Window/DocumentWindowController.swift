@@ -334,7 +334,8 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
         if let first = layoutManager.textContainers.first?.textView {
             textView.defaultParagraphStyle = first.defaultParagraphStyle
             textView.typingAttributes = first.typingAttributes
-            // Writing Tools as on the first page (off for a read-only large file).
+            // Writing Tools as on the first page (off for a read-only large
+            // file, or when Settings has them off, 1.2.1).
             TextViewFactory.setWritingTools(on: first.writingToolsBehavior != .none, textView)
         }
         pagesView.addSubview(textView)
@@ -569,6 +570,8 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
         isClosed = true
         stopIdleLayout()
         lineIndex.stop()
+        // A box fade's display link holds the map (1.2.1 review).
+        documentMap.resetHover()
     }
 
     /// Removes pages after the one holding the last character, only when
@@ -930,13 +933,20 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
     func updateEditable() {
         let editable = !(textDocument?.preventsEditing ?? false) && !(textDocument?.isTooLargeToEdit ?? false)
             && !isReloading && !(textDocument?.isReloading ?? false)
-        let tooLarge = textDocument?.isTooLargeToEdit ?? false
         for view in textViews {
             view.isEditable = editable
             view.isSelectable = !isReloading
-            // No Writing Tools on a file too large to edit (P73).
-            TextViewFactory.setWritingTools(on: !tooLarge, view)
         }
+        applyWritingTools()
+    }
+
+    /// Writing Tools and inline predictive text as Settings has them
+    /// (1.2.1), on every view; never on a file too large to edit (P73).
+    /// Settings calls this on every window when its checkbox changes.
+    func applyWritingTools() {
+        let tooLarge = textDocument?.isTooLargeToEdit ?? false
+        let on = !tooLarge && Defaults.store.bool(forKey: Defaults.showWritingToolsKey)
+        for view in textViews { TextViewFactory.setWritingTools(on: on, view) }
     }
 
     /// A large-file reload has detached this window's layout manager.

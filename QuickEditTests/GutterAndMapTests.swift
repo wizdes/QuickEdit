@@ -15,6 +15,10 @@ final class GutterAndMapTests: XCTestCase {
 
     override func setUp() async throws {
         saved = SavedSettings()
+        // Line numbers are off by default since 1.2.1; these tests are
+        // about the gutter, so they start with it on (the default itself is
+        // checked in HoverBoxAndOptionsTests).
+        Defaults.store.set(true, forKey: Defaults.showLineNumbersKey)
         folder = FileManager.default.temporaryDirectory.appendingPathComponent("qe-gutter-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     }
@@ -68,7 +72,7 @@ final class GutterAndMapTests: XCTestCase {
     // MARK: On by default, View menu toggles
 
     func testBothAreOnByDefault() throws {
-        XCTAssertEqual(Defaults.registeredValues()[Defaults.showLineNumbersKey] as? Bool, true)
+        XCTAssertEqual(Defaults.registeredValues()[Defaults.showLineNumbersKey] as? Bool, false)  // 1.2.1
         XCTAssertEqual(Defaults.registeredValues()[Defaults.showDocumentMapKey] as? Bool, true)
         let controller = try window(numbered(60))
         XCTAssertTrue(gutterShows(controller))
@@ -130,7 +134,7 @@ final class GutterAndMapTests: XCTestCase {
         settings.loadSettingsWindowIfNeeded()
         defer { settings.window?.close() }
         settings.restoreAllDefaults(nil)
-        XCTAssertTrue(gutterShows(controller))
+        XCTAssertFalse(gutterShows(controller), "line numbers are off by default since 1.2.1")
         XCTAssertFalse(controller.documentMap.isHidden)
     }
 
