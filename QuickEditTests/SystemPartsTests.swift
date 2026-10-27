@@ -228,7 +228,7 @@ final class SystemPartsTests: XCTestCase {
 
     func testWritingToolsGivePlainTextAndAreOffForAFileTooLargeToEdit() throws {
         let (_, controller) = try untitled()
-        XCTAssertEqual(controller.textView.writingToolsBehavior, .default)
+        XCTAssertEqual(controller.textView.writingToolsBehavior, .none)  // off by default since 1.2.1
         XCTAssertEqual(controller.textView.allowedWritingToolsResultOptions, [.plainText])
 
         TextDocument.largeFileThreshold = 10

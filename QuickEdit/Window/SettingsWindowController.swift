@@ -51,6 +51,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
     private(set) var restoreButton: NSButton?
     /// Every checkbox, by the default it writes.
     private(set) var checkboxes: [DefaultsKey: NSButton] = [:]
+    /// The checkboxes for QuickEdit's own settings (1.2.1), by key:
+    /// "Show line numbers" (`Defaults.showLineNumbersKey`, also View >
+    /// Show Line Numbers) and "Show Writing Tools and predictive text"
+    /// (`Defaults.showWritingToolsKey`). Open windows follow them at once.
+    private(set) var viewCheckboxes: [String: NSButton] = [:]
     /// Settings > Keyboard (M9 n3).
     private(set) var keyboardTab: KeyboardTabController?
     /// Tab view heights: the two TextEdit tabs share one, Keyboard is taller,
@@ -231,6 +236,26 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
                 bottom = max(bottom, frame.maxY)
             }
         }
+        // Under the spelling options (1.2.1): Writing Tools and predictive
+        // text, off by default.
+        let writingRow = Self.optionColumns[0].count
+        let writingFrame = NSRect(x: Layout.leftColumn, y: optionsTop + 19 + CGFloat(writingRow) * Layout.rowStep,
+                                  width: Layout.leftColumnWidth, height: Layout.checkboxHeight)
+        let writing = viewCheckbox(Defaults.showWritingToolsKey, "Show Writing Tools and predictive text",
+                                   frame: writingFrame)
+        writing.toolTip = "Select to show Apple Intelligence Writing Tools and inline predictive text while you type."
+        view.addSubview(writing)
+        bottom = max(bottom, writingFrame.maxY)
+
+        // View (1.2.1): the same setting as View > Show Line Numbers.
+        let viewTop = bottom + 16
+        view.addSubview(header("View", top: viewTop))
+        let lineNumbersFrame = NSRect(x: Layout.leftColumn, y: viewTop + 19, width: Layout.leftColumnWidth,
+                                      height: Layout.checkboxHeight)
+        let lineNumbers = viewCheckbox(Defaults.showLineNumbersKey, "Show line numbers", frame: lineNumbersFrame)
+        lineNumbers.toolTip = "Select to show line numbers on the left of every window (View > Show Line Numbers)."
+        view.addSubview(lineNumbers)
+        bottom = lineNumbersFrame.maxY
 
         widthField = width
         heightField = height
@@ -273,7 +298,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
     /// Tab order in reading order on each tab, each a closed loop; the
     /// Width field gets focus first (M6 review row 13).
     private func linkKeyViews(_ window: NSWindow) {
-        let options = Self.optionColumns.flatMap { $0 }.compactMap { checkboxes[$0.0] }
+        // Reading order: the left column (spelling, then Writing Tools),
+        // the right column, then View (1.2.1).
+        let left = Self.optionColumns[0].compactMap { checkboxes[$0.0] } + [viewCheckboxes[Defaults.showWritingToolsKey]].compactMap { $0 }
+        let right = Self.optionColumns.dropFirst().flatMap { $0 }.compactMap { checkboxes[$0.0] }
+        let options = left + right + [viewCheckboxes[Defaults.showLineNumbersKey]].compactMap { $0 }
         let newDocument: [NSView] = [checkboxes[.showPageBreaks], widthField, heightField, changeFontButton]
             .compactMap { $0 } + options
         let openAndSave: [NSView] = [checkboxes[.addExtensionToNewPlainTextFiles], openEncodingPopUp, saveEncodingPopUp]
@@ -340,6 +369,17 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         return box
     }
 
+    /// A checkbox for one of QuickEdit's own settings (1.2.1).
+    private func viewCheckbox(_ key: String, _ title: String, frame: NSRect) -> NSButton {
+        let box = NSButton(checkboxWithTitle: title, target: self, action: #selector(viewCheckboxChanged(_:)))
+        box.frame = frame
+        box.controlSize = .small
+        box.font = Self.smallFont
+        box.identifier = NSUserInterfaceItemIdentifier(key)
+        viewCheckboxes[key] = box
+        return box
+    }
+
     /// Whole numbers 1 to 10000 (Preferences.nib:405-460).
     private func sizeField(_ key: DefaultsKey, frame: NSRect) -> NSTextField {
         let formatter = NumberFormatter()
@@ -395,6 +435,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
     func refreshControls() {
         guard window != nil else { return }
         for (key, box) in checkboxes { box.state = Defaults.bool(key) ? .on : .off }
+        for (key, box) in viewCheckboxes { box.state = Defaults.store.bool(forKey: key) ? .on : .off }
         for (field, key) in [(widthField, DefaultsKey.widthInChars), (heightField, .heightInChars)] {
             guard let field, field.currentEditor() == nil else { continue }
             field.integerValue = Defaults.integer(key)
@@ -445,6 +486,15 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         Defaults.store.set(sender.state == .on, forKey: key.rawValue)
     }
 
+    /// QuickEdit's own settings (1.2.1): written, and every open window
+    /// follows at once, as the View menu does.
+    @objc func viewCheckboxChanged(_ sender: NSButton) {
+        guard let key = sender.identifier?.rawValue, viewCheckboxes[key] === sender else { return }
+        Defaults.store.set(sender.state == .on, forKey: key)
+        if key == Defaults.showLineNumbersKey { ViewOptionsCommand.updateWindows() }
+        if key == Defaults.showWritingToolsKey { ViewOptionsCommand.updateWritingTools() }
+    }
+
     @objc func sizeFieldChanged(_ sender: NSTextField) {
         guard let raw = sender.identifier?.rawValue, let key = DefaultsKey(rawValue: raw) else { return }
         guard let number = sender.objectValue as? NSNumber else {
@@ -469,9 +519,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         Defaults.restoreAll()
         // Restore All also drops the custom keyboard shortcuts.
         if let menu = NSApp.mainMenu { Shortcuts.apply(to: menu) }
-        // Line numbers and the map are View menu settings that open
-        // windows follow at once; they are back on now.
+        // Line numbers, the map and Writing Tools are settings that open
+        // windows follow at once: line numbers and Writing Tools are off
+        // now (1.2.1), the map on.
         ViewOptionsCommand.updateWindows()
+        ViewOptionsCommand.updateWritingTools()
         refreshControls()
     }
 

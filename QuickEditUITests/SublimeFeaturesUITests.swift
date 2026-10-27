@@ -251,9 +251,14 @@ final class SublimeFeaturesUITests: QuickEditUITestCase {
     func testGutterAndMapShowAndHideFromTheViewMenu() throws {
         launchWithTestSettings()
         XCTAssertTrue(map.waitForExistence(timeout: 5), "no document map by default")
-        XCTAssertTrue(gutterShows, "no line-number gutter by default")
+        XCTAssertFalse(gutterShows, "line numbers are off by default since 1.2.1")
         XCTAssertGreaterThan(map.frame.minX, textView.frame.midX, "the map is on the right")
         let width = frontWindow.frame.width
+
+        // 1.2.1: turn them on first, so the rest runs as in 1.2.0.
+        app.menuBars.menuBarItems["View"].click()
+        app.menuBars.menuBarItems["View"].menuItems["Show Line Numbers"].click()
+        waitUntil(5, "the gutter did not show") { self.gutterShows }
 
         app.menuBars.menuBarItems["View"].click()
         app.menuBars.menuBarItems["View"].menuItems["Show Line Numbers"].click()
@@ -278,15 +283,59 @@ final class SublimeFeaturesUITests: QuickEditUITestCase {
 
     // MARK: Screenshots for root
 
-    /// Window-cropped screenshots: a window with the gutter, the map and
-    /// about 60 lines; Settings > New Document and Keyboard; and the
-    /// window right after Cmd+T with two tabs.
+    /// The share of pixels in `rect` (window points, top-left origin) that
+    /// differ by more than 3% in any channel between two window pictures.
+    private func changedFraction(_ a: XCUIScreenshot, _ b: XCUIScreenshot, in rect: CGRect) throws -> Double {
+        let first = try XCTUnwrap(NSBitmapImageRep(data: a.pngRepresentation))
+        let second = try XCTUnwrap(NSBitmapImageRep(data: b.pngRepresentation))
+        XCTAssertEqual(first.pixelsWide, second.pixelsWide)
+        let scale = CGFloat(first.pixelsWide) / a.image.size.width
+        var changed = 0, total = 0
+        for y in stride(from: Int(rect.minY * scale), to: Int(rect.maxY * scale), by: 2) {
+            for x in stride(from: Int(rect.minX * scale), to: Int(rect.maxX * scale), by: 2) {
+                guard let p = first.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB),
+                      let q = second.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+                total += 1
+                if abs(p.redComponent - q.redComponent) > 0.03 || abs(p.greenComponent - q.greenComponent) > 0.03
+                    || abs(p.blueComponent - q.blueComponent) > 0.03 { changed += 1 }
+            }
+        }
+        XCTAssertGreaterThan(total, 100, "the band lies inside the picture")
+        return total > 0 ? Double(changed) / Double(total) : 0
+    }
+
+    /// Window-cropped screenshots: the default window (1.2.1: no line
+    /// numbers, the map's box hidden) at rest and with the mouse over the
+    /// map; a window with the gutter, the map and about 60 lines; Settings
+    /// > New Document and Keyboard; and the window right after Cmd+T with
+    /// two tabs.
     func testScreenshots() throws {
         let url = try fixtureFolder("gutter-map").appendingPathComponent("sixty.txt")
         launchWithTestSettings(opening: url.path)
         let window = frontWindow
         XCTAssertTrue(map.waitForExistence(timeout: 5))
-        XCTAssertTrue(gutterShows)
+        XCTAssertFalse(gutterShows, "line numbers are off by default since 1.2.1")
+        // The mouse well away from the map: the box is hidden.
+        textView.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)).hover()
+        RunLoop.current.run(until: Date().addingTimeInterval(1.0))
+        let rest = window.screenshot()
+        attachScreenshot("m121-map-at-rest", rest)
+        // Over the map: the box fades in (0.15 s).
+        map.hover()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+        let hovered = window.screenshot()
+        attachScreenshot("m121-map-hovered", hovered)
+        // The box covers the lines on screen, at the map's top: the band
+        // there must change between the two pictures (review fix 4).
+        let band = CGRect(x: map.frame.minX - window.frame.minX + 10, y: map.frame.minY - window.frame.minY + 4,
+                          width: map.frame.width - 20, height: 30)
+        let changed = try changedFraction(rest, hovered, in: band)
+        XCTAssertGreaterThan(changed, 0.2, "the box did not show on hover (\(changed) of the band changed)")
+        textView.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)).hover()
+
+        app.menuBars.menuBarItems["View"].click()
+        app.menuBars.menuBarItems["View"].menuItems["Show Line Numbers"].click()
+        waitUntil(5, "the gutter did not show") { self.gutterShows }
         RunLoop.current.run(until: Date().addingTimeInterval(1.0))
         attachScreenshot("m12-gutter-and-map", window.screenshot())
 

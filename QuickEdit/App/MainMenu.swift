@@ -348,6 +348,14 @@ final class ViewOptionsCommand: NSObject, NSMenuItemValidation {
         }
     }
 
+    /// Every document window sets Writing Tools and predictive text from
+    /// Settings again (1.2.1).
+    static func updateWritingTools() {
+        for window in NSApp.windows {
+            (window.windowController as? DocumentWindowController)?.applyWritingTools()
+        }
+    }
+
     /// The check mark shows the setting. Both items are off while the
     /// document window in front holds a large file, which never shows the
     /// gutter or the map.

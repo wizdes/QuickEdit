@@ -70,7 +70,14 @@ enum Defaults {
 
     /// View > Show Line Numbers (1.2.0): the gutter on the left of every
     /// document window. Not a TextEdit key, so kept out of `DefaultsKey`.
+    /// Off by default since 1.2.1; Settings > New Document has a checkbox
+    /// for it too.
     static let showLineNumbersKey = "ShowLineNumbers"
+
+    /// Settings > "Show Writing Tools and predictive text" (1.2.1): Apple
+    /// Intelligence's Writing Tools and the grey inline completions while
+    /// typing. Off by default. Not a TextEdit key.
+    static let showWritingToolsKey = "ShowWritingTools"
 
     /// View > Show Document Map (1.2.0): the map on the right of every
     /// document window. Not a TextEdit key.
@@ -110,7 +117,9 @@ enum Defaults {
             DefaultsKey.numberPagesWhenPrinting.rawValue: false,
             DefaultsKey.wrapToFitWhenPrinting.rawValue: true,
             paperSizeKey: PaperSize.regionDefault(for: .current).rawValue,
-            showLineNumbersKey: true,
+            // Off since 1.2.1 (the user's request); on in 1.2.0.
+            showLineNumbersKey: false,
+            showWritingToolsKey: false,
             showDocumentMapKey: true,
             // Not a TextEdit key: QuickEdit always opens one untitled window at
             // launch instead of the app-centric Open panel (root's M1 item 7).
