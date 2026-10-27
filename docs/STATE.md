@@ -1,11 +1,18 @@
 # QuickEdit state
 
-Rewritten at each milestone, never appended. Last rewrite: 2026-10-26, version 1.2.0.
+Rewritten at each milestone, never appended. Last rewrite: 2026-10-27, version 1.2.1.
 
-Milestone: 1.2.0 (six user asks: blank untitled close, Sublime-like defaults with a line-number gutter, document map, Settings cleanup, new tab without the swap, Ctrl+1 to Ctrl+9) done. Plan: ~/.claude/plans/a-bunch-of-things-lucky-parasol.md. Next: the POST_MVP.md list, only when the user asks.
+Milestone: 1.2.1 (three user tweaks: the document map's box shows only when the mouse is within 8 px of the map, with a fade, and the separator is gone; line numbers off by default with a Settings > New Document checkbox; Writing Tools and inline predictive text off by default with a Settings checkbox, key ShowWritingTools) done. Next: the POST_MVP.md list, only when the user asks.
 Branch / worktree / commit: dev is merged into main at each release. Work continues on dev (worktrees/dev).
 Unmerged work: none.
-Releases: 1.0 (2026-10-25); 1.0.1 (2026-10-26: About credit and README, repo made public, page at https://yili.dev/projects/quickedit/); 1.1.0 (2026-10-26: tabs); 1.2.0 (2026-10-26, tag on 05f87ca, DMG SHA-256 d69d92a2...6b51).
+Releases: 1.0 (2026-10-25); 1.0.1 (2026-10-26: About credit and README, repo made public, page at https://yili.dev/projects/quickedit/); 1.1.0 (2026-10-26: tabs); 1.2.0 (2026-10-26, tag on 05f87ca, DMG SHA-256 d69d92a2...6b51); 1.2.1 (2026-10-27, tag on 32d1936, DMG SHA-256 7d1ed999...7322).
+
+1.2.1 checks:
+- Builder: a native Opus builder, one fix round. Review: Astra (qe-121-review-astra). Accepted all 4: the fade display link kept a closed window's map alive (now stopped on leaving the window and in windowWillClose); a drag that ended outside the hover area left the box on (tracking area now has .enabledDuringMouseDrag and mouse-up resamples the pointer); test gaps for the large-file Writing Tools guard with the setting on, and for the hover screenshots.
+- Quick 527 of 527 with UI tests; full run at the release 590 of 590 (the speech test passed this time).
+- Test changes for the new defaults: line-number and Writing Tools default assertions flipped; GutterAndMapTests setUp and three TypingSpeedTests now turn line numbers on first; Settings tab-order count 13 to 15.
+- Choices to check: the hover area works in background windows too; the vertical scroller still sits between the text and the map (draws nothing at rest with the default fading scrollers); inline math results (mathExpressionCompletionType) left on.
+- Follow-ups: `./build.sh speed` still not run (three speed tests changed); a closed document's text storage stays alive in the test host even with no fade (older than 1.2.1); maybe a Settings checkbox for the document map.
 
 1.2.0 checks:
 - Builder: a native Opus builder (the runner sandbox cannot run Xcode), two fix rounds.
