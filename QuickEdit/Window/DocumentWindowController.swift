@@ -15,6 +15,14 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
     /// One layout manager for every text view in this window.
     let layoutManager: NSLayoutManager
     let scrollView: ScalingScrollView
+    /// The window's content (1.2.0): the scroll view and the document map.
+    let container: DocumentContainerView
+    /// Where each line starts, for the gutter and the map (1.2.0).
+    let lineIndex: LineIndex
+    /// The line-number gutter: the scroll view's vertical ruler (1.2.0).
+    let lineNumberView: LineNumberRulerView
+    /// The document map on the right (1.2.0).
+    var documentMap: DocumentMapView { container.documentMap }
 
     /// Wrap to Page is on. Follows the document's `hasMultiplePages`.
     private(set) var hasMultiplePages = false
@@ -65,11 +73,16 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
                                                controlSize: .regular,
                                                scrollerStyle: NSScroller.preferredScrollerStyle)
         scrollView.frame = NSRect(origin: .zero, size: frameSize)
+        lineIndex = LineIndex(storage: document.textStorage)
+        lineNumberView = LineNumberRulerView(scrollView: scrollView, lineIndex: lineIndex)
+        scrollView.verticalRulerView = lineNumberView
+        container = DocumentContainerView(scrollView: scrollView, documentMap: DocumentMapView(lineIndex: lineIndex))
+        container.autoresizingMask = [.width, .height]
 
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: frameSize),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
                               backing: .buffered, defer: true)
-        window.contentView = scrollView
+        window.contentView = container
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
@@ -83,8 +96,14 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
         layoutManager.delegate = self
         // This makes the first text view (DocumentWindowController.m:681-698).
         setHasMultiplePages(document.hasMultiplePages, force: true)
+        lineIndex.onProgress = { [weak self] in self?.lineIndexProgressed() }
         if hasMultiplePages, let pagesView {
             resizeWindow(forViewSize: pagesView.pageRect(forPage: 0).size)
+        } else {
+            // The gutter and the map take their room outside the text area,
+            // so "Width: 90 characters" still means 90 characters of text.
+            resizeWindow(forViewSize: NSSize(width: contentSize.width - MultiplePageView.textPadding * 2,
+                                             height: contentSize.height))
         }
 
         window.center()
@@ -124,6 +143,11 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
         scrollView.contentView.postsBoundsChangedNotifications = true
         center.addObserver(self, selector: #selector(restorableStateChanged(_:)),
                            name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
+        // The gutter and the map follow scrolling and the text's height.
+        center.addObserver(self, selector: #selector(visibleTextMoved(_:)),
+                           name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
+        center.addObserver(self, selector: #selector(visibleTextMoved(_:)),
+                           name: NSView.frameDidChangeNotification, object: scrollView.contentView)
         center.addObserver(self, selector: #selector(documentTextDidProcessEditing(_:)),
                            name: NSTextStorage.didProcessEditingNotification, object: document.textStorage)
         center.addObserver(self, selector: #selector(documentTextWillProcessEditing(_:)),
@@ -216,6 +240,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
         // AppKit clears the shared delegate when the old first view leaves
         // the layout manager, so set it again.
         textView.delegate = self
+        updateGutterAndMap()
         updateEditable()
         window?.makeFirstResponder(textView)
         // So focus is not stolen (DocumentWindowController.m:613-614).
@@ -246,6 +271,10 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
     /// (M8 review row 2). The checks are shared by every view on the
     /// layout manager, so the first view stands for all.
     func applyLargeFileMode(updatesTitle: Bool = true) {
+        // Revert and the reloads replace the whole text, maybe off the
+        // main thread: the line index starts again (1.2.0).
+        lineIndex.reset()
+        updateGutterAndMap()
         let large = textDocument?.isLargeFile == true
         if large, checksBeforeLargeFile == nil {
             checksBeforeLargeFile = TextViewFactory.TypingChecks(of: textView)
@@ -387,6 +416,31 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
             Signposts.endStorageEdit(storageEditSignpost)
             self.storageEditSignpost = nil
         }
+        if let storage = notification.object as? NSTextStorage, storage.editedMask.contains(.editedCharacters),
+           !scrollView.rulersVisible, documentMap.isHidden {
+            // Nothing shows the line index (Wrap to Page, or both turned
+            // off): forget it, at no cost per key; it is built again when
+            // the gutter or the map needs it.
+            lineIndex.reset()
+        } else if let storage = notification.object as? NSTextStorage, storage.editedMask.contains(.editedCharacters) {
+            let linesChanged = lineIndex.edit(editedRange: storage.editedRange, changeInLength: storage.changeInLength)
+            if scrollView.rulersVisible {
+                if linesChanged {
+                    // The width waits for the next turn: a new width
+                    // retiles the scroll view, which lays out text, and
+                    // the storage is still editing here (an exception).
+                    RunLoop.main.perform { [weak self] in
+                        MainActor.assumeIsolated { self?.lineNumberView.updateThickness() }
+                    }
+                    lineNumberView.redraw()
+                } else {
+                    // Only text inside a line changed: no number moves at
+                    // once, so typing does not pay for the gutter each key.
+                    lineNumberView.scheduleRedraw()
+                }
+            }
+            documentMap.textDidChange()
+        }
         guard hasMultiplePages, let storage = notification.object as? NSTextStorage,
               storage.editedMask.contains(.editedCharacters) else { return }
         // The edit left glyphs and layout after it to make again.
@@ -514,6 +568,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
     func windowWillClose(_ notification: Notification) {
         isClosed = true
         stopIdleLayout()
+        lineIndex.stop()
     }
 
     /// Removes pages after the one holding the last character, only when
@@ -561,6 +616,50 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
         layoutManager.ensureLayout(forCharacterRange: NSRange(location: 0, length: length))
     }
 
+    // MARK: Line numbers and the document map (1.2.0)
+
+    /// Shows or hides the gutter and the map from View > Show Line Numbers
+    /// and Show Document Map. Both hide in Wrap to Page and for a file in
+    /// large-file mode (over 50 MB): its line index would take 8 bytes a
+    /// line, gigabytes for a 1 GB file of short lines, so none is built.
+    /// The window keeps its size: the text area gives or takes the room.
+    func updateGutterAndMap() {
+        let shown = !hasMultiplePages && textDocument?.isLargeFile != true
+        let showGutter = shown && Defaults.store.bool(forKey: Defaults.showLineNumbersKey)
+        let showMap = shown && Defaults.store.bool(forKey: Defaults.showDocumentMapKey)
+        if !showGutter && !showMap { lineIndex.reset() }
+        let firstView = layoutManager.textContainers.first?.textView
+        lineNumberView.textView = firstView
+        documentMap.textView = firstView
+        if scrollView.hasVerticalRuler != showGutter || scrollView.rulersVisible != showGutter {
+            scrollView.hasVerticalRuler = showGutter
+            scrollView.rulersVisible = showGutter
+        }
+        if showGutter { lineNumberView.updateThickness() }
+        if documentMap.isHidden == showMap {
+            documentMap.isHidden = !showMap
+            container.tile()
+        }
+        lineNumberView.redraw()
+        documentMap.needsDisplay = true
+        if !isSettingSize, viewSize != .zero { recordViewSize() }
+    }
+
+    /// Scrolled, or the text area changed size: the gutter and the map move.
+    @objc private func visibleTextMoved(_ notification: Notification) {
+        if scrollView.rulersVisible { lineNumberView.redraw() }
+        if !documentMap.isHidden { documentMap.needsDisplay = true }
+    }
+
+    /// The line index found more lines on an idle turn.
+    private func lineIndexProgressed() {
+        if scrollView.rulersVisible {
+            lineNumberView.updateThickness()
+            lineNumberView.redraw()
+        }
+        if !documentMap.isHidden { documentMap.needsDisplay = true }
+    }
+
     // MARK: Window size
 
     /// Sets the window frame so the text area is `size`; in Wrap to Window
@@ -578,11 +677,13 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
             size.width += MultiplePageView.textPadding * 2
             style = scrollView.scrollerStyle
         }
-        let scrollSize = NSScrollView.frameSize(forContentSize: size,
+        var scrollSize = NSScrollView.frameSize(forContentSize: size,
                                                 horizontalScrollerClass: scrollView.hasHorizontalScroller ? NSScroller.self : nil,
                                                 verticalScrollerClass: scrollView.hasVerticalScroller ? NSScroller.self : nil,
                                                 borderType: scrollView.borderType, controlSize: .regular,
                                                 scrollerStyle: style)
+        // NSScrollView's size math leaves out rulers; the map is beside it.
+        scrollSize.width += sideWidth
         let original = window.frame
         var frame = window.frameRect(forContentRect: NSRect(origin: .zero, size: scrollSize))
         frame.origin = NSPoint(x: original.minX, y: original.maxY - frame.height)
@@ -596,9 +697,18 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
                                             verticalScrollerClass: scrollView.hasVerticalScroller ? NSScroller.self : nil,
                                             borderType: scrollView.borderType, controlSize: .regular,
                                             scrollerStyle: scrollerStyle)
+        size.width -= gutterWidth
         if !hasMultiplePages { size.width -= MultiplePageView.textPadding * 2 }
         return size
     }
+
+    /// The gutter's width while it shows, else 0.
+    var gutterWidth: CGFloat {
+        scrollView.hasVerticalRuler && scrollView.rulersVisible ? lineNumberView.ruleThickness : 0
+    }
+
+    /// The width the gutter and the map take beside the text area.
+    var sideWidth: CGFloat { gutterWidth + container.mapWidth }
 
     private func recordViewSize() {
         guard !isSettingSize else { return }
@@ -795,6 +905,8 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
 
     func textDidChange(_ notification: Notification) {
         Signposts.markOnce(.firstKeyAccepted)
+        // A blank untitled window stays off the saved window list (1.2.0).
+        if textDocument?.fileURL == nil { textDocument?.updateRestorable() }
         guard encodingCheckPending else { return }
         encodingCheckPending = false
         // While an input method composes, the marked text is not the user's
@@ -837,6 +949,9 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
     func beginReload() {
         isReloading = true
         stopIdleLayout()
+        // The text is replaced on another thread now: the line index stops
+        // scanning and answering, so the gutter and the map read nothing.
+        lineIndex.pause()
         updateEditable()
     }
 
@@ -844,6 +959,8 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
     /// from the start, as the new text has no glyphs yet (M8 review row 34).
     func endReload() {
         isReloading = false
+        lineIndex.resume()
+        updateGutterAndMap()
         updateEditable()
         if hasMultiplePages {
             resetIdleLayout()

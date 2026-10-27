@@ -18,10 +18,14 @@ final class PageModeTests: XCTestCase {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         savedDefaults = UserDefaults.standard.persistentDomain(forName: bundleID)
         ScalingScrollView.animatesZoom = false
+        // The page counts below were worked out for the plain font before
+        // 1.2.0 (Menlo 11, AppKit's default size); the default is 13 pt now.
+        NSFont.setUserFixedPitch(NSFont(name: "Menlo-Regular", size: 11))
     }
 
     override func tearDown() async throws {
         ScalingScrollView.animatesZoom = true
+        NSFont.setUserFixedPitch(nil) // the saved domain below puts back a font the user picked
         for document in documents {
             // Edited documents would autosave later into the deleted folder
             // and the error alert would stop the test run.

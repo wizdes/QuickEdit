@@ -205,36 +205,9 @@ final class PaperSizeTests: XCTestCase {
         return controller
     }
 
-    func testSettingsHasAPaperSizePopUp() throws {
-        Defaults.store.set(PaperSize.legal.rawValue, forKey: Defaults.paperSizeKey)
-        let controller = makeController()
-        let popUp = try XCTUnwrap(controller.paperSizePopUp)
-        XCTAssertEqual(popUp.itemTitles, ["Letter", "A4", "Legal"])
-        XCTAssertEqual(popUp.titleOfSelectedItem, "Legal")
-        let newDocument = try XCTUnwrap(controller.tabView?.tabViewItems[0].view)
-        XCTAssertTrue(popUp.isDescendant(of: newDocument))
-        XCTAssertTrue(newDocument.bounds.contains(popUp.frame), "the pop-up sticks out of its tab")
-        let labels = newDocument.subviews.compactMap { ($0 as? NSTextField).flatMap { $0.isEditable ? nil : $0.stringValue } }
-        XCTAssertTrue(labels.contains("Paper size:"))
-        // Nothing overlaps the pop-up.
-        for view in newDocument.subviews where view !== popUp {
-            XCTAssertFalse(view.frame.intersects(popUp.frame), "\(view) overlaps the pop-up")
-        }
-    }
-
-    func testChoosingAPaperWritesTheDefault() throws {
-        Defaults.store.set(PaperSize.letter.rawValue, forKey: Defaults.paperSizeKey)
-        let controller = makeController()
-        let popUp = try XCTUnwrap(controller.paperSizePopUp)
-        popUp.selectItem(withTitle: "A4")
-        _ = popUp.sendAction(popUp.action, to: popUp.target)
-        XCTAssertEqual(saved.persisted?[Defaults.paperSizeKey] as? String, "A4")
-        XCTAssertEqual(PaperSize.current, .a4)
-        // Another change made elsewhere shows up in the pop-up.
-        Defaults.store.set(PaperSize.legal.rawValue, forKey: Defaults.paperSizeKey)
-        controller.refreshControls()
-        XCTAssertEqual(popUp.titleOfSelectedItem, "Legal")
-    }
+    // 1.2.0: the Settings Paper size pop-up is gone, and with it its two
+    // tests (testSettingsHasAPaperSizePopUp, testChoosingAPaperWritesTheDefault).
+    // The stored size stays and is still used (the tests above and below).
 
     func testRestoreAllDefaultsPutsTheRegionPaperBack() throws {
         let other: PaperSize = PaperSize.regionDefault(for: .current) == .legal ? .a4 : .legal
@@ -243,10 +216,9 @@ final class PaperSizeTests: XCTestCase {
         try XCTUnwrap(controller.restoreButton).performClick(nil)
         XCTAssertNil(saved.persisted?[Defaults.paperSizeKey])
         XCTAssertEqual(PaperSize.current, PaperSize.regionDefault(for: .current))
-        XCTAssertEqual(controller.paperSizePopUp?.titleOfSelectedItem, PaperSize.current.title)
     }
 
-    /// Rendered evidence for root: the New Document tab with the pop-up,
+    /// Rendered evidence for root: the New Document tab (no pop-up since 1.2.0),
     /// drawn off screen into build/m7-evidence (no window is shown).
     func testRenderNewDocumentTab() throws {
         let controller = makeController()

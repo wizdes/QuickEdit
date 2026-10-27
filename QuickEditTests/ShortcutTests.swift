@@ -47,14 +47,16 @@ final class ShortcutTests: XCTestCase {
         "transformations.upper", "transformations.lower", "transformations.capitalize",
         "speech.start", "speech.stop",
         "format.preventEditing", "format.wrapToPage",
-        "view.actualSize", "view.zoomIn", "view.zoomOut", "view.fullScreen",
-        "window.minimize", "window.zoom", "window.previousTab", "window.nextTab", "window.bringAllToFront",
+        "view.actualSize", "view.zoomIn", "view.zoomOut", "view.lineNumbers", "view.documentMap", "view.fullScreen",
+        "window.minimize", "window.zoom", "window.previousTab", "window.nextTab",
+        "window.tab1", "window.tab2", "window.tab3", "window.tab4", "window.tab5", "window.tab6", "window.tab7",
+        "window.tab8", "window.lastTab", "window.bringAllToFront",
     ]
 
     func testEveryCommandHasAStableUniqueID() {
         let ids = Shortcuts.commandItems(in: MainMenu.build()).map(\.command.id)
         XCTAssertEqual(ids, Self.allIDs)
-        XCTAssertEqual(Set(ids).count, 61)
+        XCTAssertEqual(Set(ids).count, 72) // 61 before 1.2.0, plus 2 View and 9 Window items
     }
 
     func testDefaultShortcutsAreTheMenusOwnKeys() {
@@ -74,7 +76,7 @@ final class ShortcutTests: XCTestCase {
         for id in Shortcuts.commandItems(in: live).map(\.command.id) where ids.last != id { ids.append(id) }
         XCTAssertEqual(ids, Self.allIDs)
         let rows = Shortcuts.rows(for: live).filter { if case .command = $0 { true } else { false } }
-        XCTAssertEqual(rows.count, 61, "one row per command in the live menu bar")
+        XCTAssertEqual(rows.count, 72, "one row per command in the live menu bar")
     }
 
     // MARK: 2. The store keeps changes only
@@ -375,12 +377,13 @@ final class ShortcutTests: XCTestCase {
         KeyboardTabController(menuBar: { menu })
     }
 
-    /// One flat table: 6 menu rows, 5 Edit submenu rows, 61 commands (72
-    /// rows; M9 had 69 before M11's New Tab, Show Previous Tab and Show
-    /// Next Tab; the mockup's 70 had Open Recent > Clear Menu, which AppKit owns).
+    /// One flat table: 6 menu rows, 5 Edit submenu rows, 72 commands (83
+    /// rows; 72 before 1.2.0's 2 View and 9 Window items; M9 had 69 before
+    /// M11's New Tab, Show Previous Tab and Show Next Tab; the mockup's 70
+    /// had Open Recent > Clear Menu, which AppKit owns).
     func testTabListsEveryCommandUnderAHeaderRowPerMenu() throws {
         let tab = makeTab(MainMenu.build())
-        XCTAssertEqual(tab.rows.count, 72)
+        XCTAssertEqual(tab.rows.count, 83)
         let headers = tab.rows.compactMap { row -> String? in
             switch row {
             case let .menu(title): "menu " + title
@@ -395,7 +398,7 @@ final class ShortcutTests: XCTestCase {
             if case let .command(command, _) = row { command.name } else { nil }
         }
         XCTAssertFalse(names.contains("Clear Menu"))
-        XCTAssertEqual(tab.tableView.numberOfRows, 72)
+        XCTAssertEqual(tab.tableView.numberOfRows, 83)
         XCTAssertTrue(tab.tableView.delegate?.tableView?(tab.tableView, isGroupRow: 0) ?? false)
         XCTAssertFalse(tab.tableView.delegate?.tableView?(tab.tableView, shouldSelectRow: 0) ?? true)
     }

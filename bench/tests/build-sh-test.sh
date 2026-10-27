@@ -123,6 +123,9 @@ for want in "-configuration" "Debug" "SWIFT_OPTIMIZATION_LEVEL=-O" "SWIFT_COMPIL
     "-only-testing:QuickEditTests/PrintTests/testTenMegabyteExportInWrapToPageStaysUnderTwiceTheText" \
     "-only-testing:QuickEditTests/PlainTextIOTests/testLineEndingCountOf100MBIsFast" \
     "-only-testing:QuickEditTests/TypingSpeedTests/testWrapToPageTypingAtTheStartOf100MB" \
+    "-only-testing:QuickEditTests/TypingSpeedTests/testTypingAtTheEndOf10MBDefaultView" \
+    "-only-testing:QuickEditTests/TypingSpeedTests/testReturnNearTheStartOf49MBIndexed" \
+    "-only-testing:QuickEditTests/TypingSpeedTests/testPasting10MBIntoAnEmptyDocument" \
     "-only-testing:QuickEditTests/LargeFileSpeedTests/testOneGigabyteOpensReadOnlyWithinTheLimits" \
     "-only-testing:QuickEditTests/LargeFileSpeedTests/testHalfGigabyteOpensEditableWithinTheLimits" \
     "-only-testing:QuickEditTests/LargeFileSpeedTests/testOneGigabyteReloadStaysWithinTheLimits"; do

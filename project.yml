@@ -14,7 +14,7 @@ settings:
     SWIFT_VERSION: "6.0"            # Swift 6 language mode
     SWIFT_STRICT_CONCURRENCY: complete
     MACOSX_DEPLOYMENT_TARGET: "27.0"
-    MARKETING_VERSION: "1.1.0"      # window tabs (M11)
+    MARKETING_VERSION: "1.2.0"      # line numbers, document map, Ctrl+digit tabs
     CURRENT_PROJECT_VERSION: "1"    # build.sh passes the commit count
     DEVELOPMENT_TEAM: 8Q5V8XK85Y
     CODE_SIGN_STYLE: Manual

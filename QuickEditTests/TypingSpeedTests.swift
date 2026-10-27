@@ -54,10 +54,11 @@ final class TypingSpeedTests: XCTestCase {
 
     /// Types `keys` characters at the end (or, with `atStart`, the start)
     /// of a `megabytes` file, timing each as tk2bench does. Returns the samples.
-    private func typeAtEnd(megabytes: Int, keys: Int, atStart: Bool = false,
+    private func typeAtEnd(megabytes: Int, keys: Int, atStart: Bool = false, data: Data? = nil, at place: Int? = nil,
+                           key fixedKey: String? = nil,
                            configure: ((DocumentWindowController) -> Void)? = nil) throws -> Run {
         let url = folder.appendingPathComponent("\(megabytes)mb.txt")
-        try fixtureData(bytes: megabytes * 1024 * 1024).write(to: url)
+        try (data ?? fixtureData(bytes: megabytes * 1024 * 1024)).write(to: url)
         let document = try TextDocument(contentsOf: url, ofType: TextDocument.plainTextType)
         document.makeWindowControllers()
         documents.append(document)
@@ -67,7 +68,7 @@ final class TypingSpeedTests: XCTestCase {
         window.orderFront(nil)
         let textView = controller.textView
         let length = document.textStorage.length
-        textView.setSelectedRange(NSRange(location: atStart ? 0 : length, length: 0))
+        textView.setSelectedRange(NSRange(location: place ?? (atStart ? 0 : length), length: 0))
         textView.scrollRangeToVisible(textView.selectedRange())
         func layoutVisible() {
             guard let container = textView.textContainer else { return }
@@ -86,7 +87,7 @@ final class TypingSpeedTests: XCTestCase {
         RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         var run = Run()
         for i in 0..<keys {
-            let key = i % 40 == 39 ? " " : String(UnicodeScalar(UInt8(97 + i % 26)))
+            let key = fixedKey ?? (i % 40 == 39 ? " " : String(UnicodeScalar(UInt8(97 + i % 26))))
             let t0 = DispatchTime.now().uptimeNanoseconds
             textView.insertText(key, replacementRange: NSRange(location: NSNotFound, length: 0))
             let t1 = DispatchTime.now().uptimeNanoseconds
@@ -120,6 +121,102 @@ final class TypingSpeedTests: XCTestCase {
     func testTypingAtTheEndOf100MB() throws {
         let run = try typeAtEnd(megabytes: 100, keys: 200)
         print(report("M8-N7 100 MB typing at the end (large-file mode)", run))
+    }
+
+    /// 1.2.0: typing at the end of a 10 MB file, under the large-file
+    /// limit, in the default view (line numbers and the document map are
+    /// on there since 1.2.0). Prints an M12-TYPING line; the same file with
+    /// the gutter and the map off follows, so the two can be compared.
+    func testTypingAtTheEndOf10MBDefaultView() throws {
+        var gutter = false, map = false
+        let run = try typeAtEnd(megabytes: 10, keys: 200) { controller in
+            gutter = controller.scrollView.rulersVisible
+            map = !controller.documentMap.isHidden
+        }
+        print(report("M12-TYPING 10 MB typing at the end, default view (gutter \(gutter), map \(map))", run))
+        XCTAssertTrue(gutter, "the default view has line numbers")
+        XCTAssertTrue(map, "the default view has the document map")
+        if !_isDebugAssertConfiguration() {
+            XCTAssertLessThanOrEqual(percentile(run.total, 0.95), 8, "10 MB typing p95 with the gutter and the map")
+        }
+    }
+
+    /// Short lines just under the 50 MB large-file limit: the most line
+    /// starts a window ever indexes (about 3.2 million).
+    private func shortLines(bytes: Int) -> Data {
+        var out = Data()
+        out.reserveCapacity(bytes + 16)
+        var n = 0
+        while out.count + 16 <= bytes {
+            out.append(contentsOf: String(format: "short %09d\n", n).utf8)
+            n += 1
+        }
+        return out
+    }
+
+    /// 1.2.0 review item 3: Return typed near the start of a fully indexed
+    /// file just under 50 MB of short lines, gutter and map on. Each key
+    /// inserts a line start before about 3.2 million others. Limit in an
+    /// optimized build: p95 at most 8 ms, as the other typing tests.
+    func testReturnNearTheStartOf49MBIndexed() throws {
+        var starts = 0, gutter = false
+        let data = shortLines(bytes: 49 * 1024 * 1024)
+        let run = try typeAtEnd(megabytes: 49, keys: 200, data: data, at: 100, key: "\n") { controller in
+            controller.lineIndex.scanAll()
+            starts = controller.lineIndex.knownLineCount
+            gutter = controller.scrollView.rulersVisible && !controller.documentMap.isHidden
+        }
+        print(report("M12-RETURN 49 MB of short lines, Return near the start, fully indexed (\(starts) line starts, gutter and map \(gutter))", run))
+        XCTAssertTrue(gutter, "the gutter and the map must be on")
+        XCTAssertGreaterThan(starts, 3_000_000)
+        if !_isDebugAssertConfiguration() {
+            XCTAssertLessThanOrEqual(percentile(run.total, 0.95), 8, "Return near the start of 49 MB p95")
+        }
+    }
+
+    /// 1.2.0 review item 3: pasting 10 MB of lines into an empty document,
+    /// gutter and map on: the edit, layout of the visible part and one
+    /// display, three times in fresh windows. Limit in an optimized build:
+    /// at most 200 ms, the main-thread limit of the large-file tests.
+    func testPasting10MBIntoAnEmptyDocument() throws {
+        let text = String(decoding: fixtureData(bytes: 10 * 1024 * 1024), as: UTF8.self)
+        var totals: [Double] = [], edits: [Double] = []
+        for _ in 0..<3 {
+            let document = TextDocument()
+            document.makeWindowControllers()
+            documents.append(document)
+            let controller = try XCTUnwrap(document.windowControllers.first as? DocumentWindowController)
+            let window = try XCTUnwrap(controller.window)
+            window.orderFront(nil)
+            window.displayIfNeeded()
+            XCTAssertTrue(controller.scrollView.rulersVisible && !controller.documentMap.isHidden)
+            let t0 = DispatchTime.now().uptimeNanoseconds
+            controller.textView.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+            let t1 = DispatchTime.now().uptimeNanoseconds
+            window.layoutIfNeeded()
+            window.displayIfNeeded()
+            CATransaction.flush()
+            let t2 = DispatchTime.now().uptimeNanoseconds
+            edits.append(Double(t1 - t0) / 1e6)
+            totals.append(Double(t2 - t0) / 1e6)
+            window.orderOut(nil)
+        }
+        print(String(format: "M12-PASTE 10 MB into an empty document: total %.1f / %.1f / %.1f ms; edit %.1f / %.1f / %.1f ms; optimized: %@",
+                     totals[0], totals[1], totals[2], edits[0], edits[1], edits[2],
+                     _isDebugAssertConfiguration() ? "false" : "true"))
+        if !_isDebugAssertConfiguration() {
+            XCTAssertLessThanOrEqual(totals.max() ?? 0, 200, "10 MB paste with the gutter and the map")
+        }
+    }
+
+    /// The same with the gutter and the map off, to compare.
+    func testTypingAtTheEndOf10MBGutterAndMapOff() throws {
+        let saved = SavedSettings()
+        defer { saved.restore() }
+        Defaults.store.set(false, forKey: Defaults.showLineNumbersKey)
+        Defaults.store.set(false, forKey: Defaults.showDocumentMapKey)
+        let run = try typeAtEnd(megabytes: 10, keys: 200)
+        print(report("M12-TYPING 10 MB typing at the end, gutter and map off", run))
     }
 
     /// M8 review row 3: in Wrap to Page each key starts the idle layout

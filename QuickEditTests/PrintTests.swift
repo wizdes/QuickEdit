@@ -17,6 +17,11 @@ final class PrintTests: XCTestCase {
         saved = SavedSettings()
         // Letter paper, so the page counts below do not depend on the Mac's region.
         Defaults.store.set(PaperSize.letter.rawValue, forKey: Defaults.paperSizeKey)
+        // The page counts assume short lines that never wrap, worked out
+        // for the plain font before 1.2.0 (Menlo 11); the default is 13 pt
+        // now, where the 10 MB fixture's lines would wrap. SavedSettings
+        // puts the user's font back.
+        NSFont.setUserFixedPitch(NSFont(name: "Menlo-Regular", size: 11))
         folder = FileManager.default.temporaryDirectory.appendingPathComponent("qe-print-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     }

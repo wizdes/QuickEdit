@@ -69,6 +69,29 @@ final class ScalingScrollView: NSScrollView, NSMenuItemValidation {
         }
     }
 
+    /// The text area's size. NSScrollView's own value leaves out the
+    /// vertical ruler (the line-number gutter, 1.2.0), which takes its
+    /// width from the clip view; this one does not.
+    override var contentSize: NSSize {
+        var size = super.contentSize
+        if hasVerticalRuler, rulersVisible, let ruler = verticalRulerView {
+            size.width = max(0, size.width - ruler.requiredThickness)
+        }
+        return size
+    }
+
+    /// The line-number gutter (1.2.0) is left out: it only helps the eye,
+    /// VoiceOver reads the text itself, and as a ruler with no action it
+    /// fails the accessibility audit ("Action is missing", measured
+    /// 2026-10-26). Marking the ruler as no accessibility element instead
+    /// made AppKit report no children at all, so the text view vanished.
+    override func accessibilityChildren() -> [Any]? {
+        guard let children = super.accessibilityChildren(), let ruler = verticalRulerView else {
+            return super.accessibilityChildren()
+        }
+        return children.filter { ($0 as AnyObject) !== ruler }
+    }
+
     /// AppKit turns off live-resize content preservation for NSScrollView
     /// subclasses; turn it back on (ScalingScrollView.m:94-96).
     override var preservesContentDuringLiveResize: Bool { drawsBackground }

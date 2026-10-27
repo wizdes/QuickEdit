@@ -25,13 +25,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
     private static let spellingTip = "Choose Edit > Spelling and Grammar to change this option for individual documents."
     private static let substitutionsTip = "Choose Edit > Substitutions to change this option for individual documents."
 
-    /// The Options checkboxes, two columns of four, top to bottom
-    /// (Preferences.nib:867-1290 without "Show ruler" and "Smart links").
+    /// The Options checkboxes, two columns, top to bottom
+    /// (Preferences.nib:867-1290 without "Show ruler" and "Smart links",
+    /// and since 1.2.0 without "Data detectors": new windows always start
+    /// with them off).
     static let optionColumns: [[(DefaultsKey, String)]] = [
         [(.checkSpellingWhileTyping, "Check spelling as you type"),
          (.checkGrammarWithSpelling, "Check grammar with spelling"),
-         (.correctSpellingAutomatically, "Correct spelling automatically"),
-         (.dataDetectors, "Data detectors")],
+         (.correctSpellingAutomatically, "Correct spelling automatically")],
         [(.smartCopyPaste, "Smart copy/paste"),
          (.smartQuotes, "Smart quotes"),
          (.smartDashes, "Smart dashes"),
@@ -48,8 +49,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
     private(set) var openEncodingPopUp: EncodingPopUpButton?
     private(set) var saveEncodingPopUp: EncodingPopUpButton?
     private(set) var restoreButton: NSButton?
-    /// Paper size for new documents (M7; not in TextEdit, which used Page Setup).
-    private(set) var paperSizePopUp: NSPopUpButton?
     /// Every checkbox, by the default it writes.
     private(set) var checkboxes: [DefaultsKey: NSButton] = [:]
     /// Settings > Keyboard (M9 n3).
@@ -183,20 +182,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
                             frame: NSRect(x: 20, y: 38, width: 195, height: Layout.checkboxHeight))
         wrap.toolTip = "Select to make text wrap to document margins rather than window boundaries."
         view.addSubview(wrap)
-        // Paper size (M7, user decision U1: no Page Setup), on the Wrap to
-        // page row: it sets the page size for Wrap to Page and PDFs.
-        view.addSubview(label("Paper size:", frame: NSRect(x: 222, y: 41, width: 62, height: 14)))
-        let paper = NSPopUpButton(frame: NSRect(x: 286, y: 36, width: 96, height: 22), pullsDown: false)
-        paper.controlSize = .small
-        paper.font = Self.smallFont
-        paper.addItems(withTitles: PaperSize.allCases.map(\.title))
-        paper.identifier = NSUserInterfaceItemIdentifier(Defaults.paperSizeKey)
-        paper.setAccessibilityLabel("Paper size")
-        paper.toolTip = "Choose the paper size for Wrap to Page and for PDFs of new documents."
-        paper.target = self
-        paper.action = #selector(paperSizeChanged(_:))
-        view.addSubview(paper)
-        paperSizePopUp = paper
+        // The Paper size pop-up that sat on this row went in 1.2.0; Wrap to
+        // Page and PDFs keep the stored size (Defaults.paperSizeKey).
 
         // Window Size (:948, :365-587).
         view.addSubview(header("Window Size", top: 85))
@@ -287,7 +274,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
     /// Width field gets focus first (M6 review row 13).
     private func linkKeyViews(_ window: NSWindow) {
         let options = Self.optionColumns.flatMap { $0 }.compactMap { checkboxes[$0.0] }
-        let newDocument: [NSView] = [checkboxes[.showPageBreaks], paperSizePopUp, widthField, heightField, changeFontButton]
+        let newDocument: [NSView] = [checkboxes[.showPageBreaks], widthField, heightField, changeFontButton]
             .compactMap { $0 } + options
         let openAndSave: [NSView] = [checkboxes[.addExtensionToNewPlainTextFiles], openEncodingPopUp, saveEncodingPopUp]
             .compactMap { $0 }
@@ -413,7 +400,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
             field.integerValue = Defaults.integer(key)
         }
         fontNameField?.stringValue = Self.fontDescription(plainTextFont)
-        paperSizePopUp?.selectItem(withTitle: PaperSize.current.title)
         select(Self.encoding(for: .plainTextEncoding), in: openEncodingPopUp)
         select(Self.encoding(for: .plainTextEncodingForWrite), in: saveEncodingPopUp)
         keyboardTab?.reload()
@@ -475,12 +461,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         Defaults.store.set(number.intValue, forKey: key.rawValue)
     }
 
-    @objc func paperSizeChanged(_ sender: NSPopUpButton) {
-        guard let title = sender.titleOfSelectedItem,
-              let paper = PaperSize.allCases.first(where: { $0.title == title }) else { return }
-        Defaults.store.set(paper.rawValue, forKey: Defaults.paperSizeKey)
-    }
-
     /// Preferences.m:182-199, without the rich-text and HTML parts.
     @objc func restoreAllDefaults(_ sender: Any?) {
         // Finish a half-typed size first, so it cannot land after the reset.
@@ -489,14 +469,16 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         Defaults.restoreAll()
         // Restore All also drops the custom keyboard shortcuts.
         if let menu = NSApp.mainMenu { Shortcuts.apply(to: menu) }
+        // Line numbers and the map are View menu settings that open
+        // windows follow at once; they are back on now.
+        ViewOptionsCommand.updateWindows()
         refreshControls()
     }
 
     // MARK: The plain text font (Preferences.m:92-124)
 
-    var plainTextFont: NSFont {
-        NSFont.userFixedPitchFont(ofSize: 0) ?? .monospacedSystemFont(ofSize: 0, weight: .regular)
-    }
+    /// The font new windows use (13 pt until the user picks one).
+    var plainTextFont: NSFont { TextViewFactory.plainFont() }
 
     /// Stored by AppKit in the `NSFixedPitchFont` defaults; new windows read it.
     func setPlainTextFont(_ font: NSFont?) {
@@ -614,7 +596,11 @@ final class KeyboardTabController: NSObject, NSTableViewDataSource, NSTableViewD
     /// Shortcut column (110 pt key, 22 pt reset), a 30 pt message line.
     private enum Layout {
         static let width: CGFloat = 394
-        static let height: CGFloat = 452
+        /// 452 before 1.2.0, plus `bottomSpace`.
+        static let height: CGFloat = 464
+        /// Space under Restore Keyboard Defaults (1.2.0): it sat on the
+        /// tab's bottom edge before.
+        static let bottomSpace: CGFloat = 12
         static let side: CGFloat = 2
         static let leadTop: CGFloat = 0
         static let tableTop: CGFloat = 20
@@ -622,7 +608,8 @@ final class KeyboardTabController: NSObject, NSTableViewDataSource, NSTableViewD
         /// The note on two full-width lines, then the button under it: the
         /// longer U4 title leaves the note too narrow beside it.
         static let noteHeight: CGFloat = 30
-        static let footHeight: CGFloat = 56
+        /// The note, the button and the space under it.
+        static let footHeight: CGFloat = 56 + bottomSpace
         static let rowHeight: CGFloat = 18
         static let shortcutColumn: CGFloat = 132
         static let keyWidth: CGFloat = 110
@@ -769,7 +756,7 @@ final class KeyboardTabController: NSObject, NSTableViewDataSource, NSTableViewD
         view.addSubview(note)
 
         let buttonHeight = restoreButton.frame.height
-        restoreButton.frame = NSRect(x: Layout.width - Layout.side - buttonWidth, y: Layout.height - buttonHeight,
+        restoreButton.frame = NSRect(x: Layout.width - Layout.side - buttonWidth, y: Layout.height - Layout.bottomSpace - buttonHeight,
                                      width: buttonWidth, height: buttonHeight)
         view.addSubview(restoreButton)
     }

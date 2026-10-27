@@ -64,9 +64,31 @@ enum TabCommands {
             document.showWindows()
             return
         }
-        target.addTabbedWindow(window, ordered: .above)
-        window.tabGroup?.selectedWindow = window
-        window.makeKeyAndOrderFront(nil)
+        // The window is finished before it joins (1.2.0, Kelpi 571ac9f):
+        // laid out, with the text view taking keys, so the first frame the
+        // user sees is the finished tab.
+        window.contentView?.layoutSubtreeIfNeeded()
+        if let controller = window.windowController as? DocumentWindowController {
+            window.makeFirstResponder(controller.textView)
+        }
+        // Selected through the tab group, never with makeKeyAndOrderFront,
+        // which showed one frame of the old tab before the new one. With
+        // one tab the bar is not up yet: it comes up with no animation, or
+        // it would show one frame with the old tab selected under it.
+        if (target.tabbedWindows?.count ?? 1) <= 1 {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            NSAnimationContext.beginGrouping()
+            NSAnimationContext.current.duration = 0
+            target.addTabbedWindow(window, ordered: .above)
+            target.tabGroup?.selectedWindow = window
+            NSAnimationContext.endGrouping()
+            CATransaction.commit()
+        } else {
+            target.addTabbedWindow(window, ordered: .above)
+            target.tabGroup?.selectedWindow = window
+        }
+        window.makeKey()
     }
 
     /// File > Close's title for the window Cmd+W would close.
@@ -120,6 +142,39 @@ final class NewTabCommand: NSObject, NSMenuItemValidation {
     /// app-modal panel runs. Read-only and large documents still take a tab.
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         TabCommands.canAddTab(to: TabCommands.newTabWindow())
+    }
+}
+
+/// Window > Tab 1 … Tab 8 and Last Tab (1.2.0, Ctrl+1 … Ctrl+9, as in
+/// Safari). The item's tag is the tab number; 9 means the last tab. The
+/// items have this target, which picks the document window the way New
+/// Tab does (the key window, or with Settings in front the front document
+/// window), and select through the tab group.
+@MainActor
+final class TabNumberCommand: NSObject, NSMenuItemValidation {
+    static let shared = TabNumberCommand()
+    /// The tag of Last Tab.
+    static let lastTabTag = 9
+
+    /// The tab `tag` picks in `group`'s order; nil when that tab does not
+    /// exist or the group has one tab (nothing to switch to).
+    static func tab(for tag: Int, in group: NSWindowTabGroup?) -> NSWindow? {
+        guard let windows = group?.windows, windows.count >= 2, tag >= 1 else { return nil }
+        if tag == lastTabTag { return windows.last }
+        return tag <= windows.count ? windows[tag - 1] : nil
+    }
+
+    private static func target(for item: NSMenuItem) -> NSWindow? {
+        tab(for: item.tag, in: TabCommands.newTabWindow()?.tabGroup)
+    }
+
+    @objc func selectTabByNumber(_ sender: Any?) {
+        guard let item = sender as? NSMenuItem, let window = Self.target(for: item) else { return }
+        window.tabGroup?.selectedWindow = window
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        Self.target(for: menuItem) != nil
     }
 }
 

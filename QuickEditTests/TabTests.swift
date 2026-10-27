@@ -116,8 +116,10 @@ final class TabTests: XCTestCase {
 
         let window = try menu("Window", in: bar)
         // AppKit lists the open windows after Bring All to Front.
-        XCTAssertEqual(window.items.prefix(7).map { $0.isSeparatorItem ? "-" : $0.title },
-                       ["Minimize", "Zoom", "-", "Show Previous Tab", "Show Next Tab", "-", "Bring All to Front"])
+        // 1.2.0 added Tab 1 … Tab 8 and Last Tab (TabNumberTests).
+        XCTAssertEqual(window.items.prefix(17).map { $0.isSeparatorItem ? "-" : $0.title },
+                       ["Minimize", "Zoom", "-", "Show Previous Tab", "Show Next Tab", "-"]
+                        + (1...8).map { "Tab \($0)" } + ["Last Tab", "-", "Bring All to Front"])
         // Close stays the one Cmd+W command.
         let close = try command("file.close", in: bar)
         XCTAssertEqual(close.action, #selector(NSWindow.performClose(_:)))
@@ -214,6 +216,46 @@ final class TabTests: XCTestCase {
         XCTAssertTrue(names.allSatisfy { $0.hasPrefix("Untitled") }, "\(names)")
         wait { group.isTabBarVisible }
         XCTAssertTrue(group.isTabBarVisible, "three tabs show the tab bar")
+    }
+
+    /// 1.2.0 change 5: New Tab shows no frame of the old tab. Each change
+    /// of the tab group during New Tab is recorded: the new window's text
+    /// view must already take keys when it joins;
+    /// with one tab (no bar yet) the join and the selection happen with
+    /// animations off (CATransaction actions off, NSAnimationContext
+    /// duration 0), so the bar comes up with the new tab already selected;
+    /// and the new tab ends selected. (Kelpi 571ac9f.)
+    func testNewTabJoinsFinishedAndWithoutAnimationFromOneTab() throws {
+        func record(from first: NSWindow) throws -> ([NewTabRecorder.Step], NSWindow?) {
+            let recorder = NewTabRecorder(group: try XCTUnwrap(first.tabGroup))
+            TabCommands.openNewTab(in: first)
+            return (recorder.finish(), recorder.added)
+        }
+
+        let (_, first) = try shownDocument("one")
+        drain()
+        let (steps, added) = try record(from: first)
+        let summary = steps.map { "\($0.kind) actionsOff=\($0.actionsOff) duration=\($0.duration) finished=\($0.finished)" }
+        print("NEWTAB-STEPS one tab: \(summary)")
+        XCTAssertFalse(steps.isEmpty, "the tab group reported no change")
+        let newTab = try XCTUnwrap(added, "no new tab")
+        XCTAssertTrue(first.tabGroup?.selectedWindow === newTab, "the new tab is selected")
+        for (index, step) in steps.enumerated() {
+            XCTAssertTrue(step.actionsOff, "one tab: change \(index) (\(step.kind)) ran with animations on: \(summary)")
+            XCTAssertEqual(step.duration, 0, "one tab: change \(index) (\(step.kind)) had an animation time: \(summary)")
+            XCTAssertTrue(step.finished, "change \(index) (\(step.kind)): the new window joined unfinished: \(summary)")
+        }
+
+        // From two tabs the bar is up: the tab's own animation may run,
+        // but the new window still joins finished and ends selected.
+        drain()
+        let (moreSteps, third) = try record(from: newTab)
+        let moreSummary = moreSteps.map { "\($0.kind) finished=\($0.finished)" }
+        print("NEWTAB-STEPS two tabs: \(moreSummary)")
+        let thirdTab = try XCTUnwrap(third, "no third tab")
+        XCTAssertTrue(first.tabGroup?.selectedWindow === thirdTab)
+        XCTAssertEqual(first.tabGroup?.windows.count, 3)
+        for step in moreSteps { XCTAssertTrue(step.finished, "two tabs: the new window joined unfinished: \(moreSummary)") }
     }
 
     /// A read-only document still takes a new tab; the new document gets
@@ -448,5 +490,48 @@ final class TabTests: XCTestCase {
         wait { first.tabGroup?.isTabBarVisible == true }
         XCTAssertEqual(first.tabGroup?.windows.count, 2)
         XCTAssertEqual(first.tabGroup?.isTabBarVisible, true)
+    }
+}
+
+/// Records each change of a tab group's windows and selection while New
+/// Tab runs (TabTests, 1.2.0 change 5).
+@MainActor
+final class NewTabRecorder {
+    struct Step { var kind: String; var actionsOff: Bool; var duration: TimeInterval; var finished: Bool }
+
+    private let group: NSWindowTabGroup
+    private let known: Set<ObjectIdentifier>
+    private var observations: [NSKeyValueObservation] = []
+    private(set) var steps: [Step] = []
+
+    init(group: NSWindowTabGroup) {
+        self.group = group
+        known = Set(group.windows.map(ObjectIdentifier.init))
+        observations.append(group.observe(\.windows) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.step("windows") }
+        })
+        observations.append(group.observe(\.selectedWindow) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.step("selected") }
+        })
+    }
+
+    /// The window that joined the group since init, if any.
+    var added: NSWindow? { group.windows.first { !known.contains(ObjectIdentifier($0)) } }
+
+    private func step(_ kind: String) {
+        let finished = added.map { window -> Bool in
+            let controller = window.windowController as? DocumentWindowController
+            // Its layout is not checked: AppKit marks the window for
+            // layout itself while it joins (measured 2026-10-26).
+            return window.firstResponder === controller?.textView
+        } ?? false
+        steps.append(Step(kind: kind, actionsOff: CATransaction.disableActions(),
+                          duration: NSAnimationContext.current.duration, finished: finished))
+    }
+
+    func finish() -> [Step] {
+        for observation in observations { observation.invalidate() }
+        observations = []
+        return steps
     }
 }

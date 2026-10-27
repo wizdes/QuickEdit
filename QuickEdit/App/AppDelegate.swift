@@ -34,4 +34,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
+
+    /// Quit (1.2.0): blank untitled documents close without a question
+    /// and leave no autosaved copy. DocumentController's review does this
+    /// first; this catches a quit that keeps windows, where AppKit may
+    /// skip the review.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        TextDocument.discardBlankUntitledDocuments()
+        return .terminateNow
+    }
 }
