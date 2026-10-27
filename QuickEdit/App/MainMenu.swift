@@ -213,6 +213,15 @@ enum MainMenu {
         menu.addItem(item(id: "view.actualSize", "Actual Size", #selector(ScalingScrollView.zoomToActualSize(_:)), "0"))
         menu.addItem(item(id: "view.zoomIn", "Zoom In", #selector(ScalingScrollView.zoomIn(_:)), ".", [.command, .shift]))
         menu.addItem(item(id: "view.zoomOut", "Zoom Out", #selector(ScalingScrollView.zoomOut(_:)), ",", [.command, .shift]))
+        // The gutter and the map (1.2.0): app-wide settings, shown as a
+        // check mark (ViewOptionsCommand).
+        menu.addItem(.separator())
+        for (id, title, action) in [("view.lineNumbers", "Show Line Numbers", #selector(ViewOptionsCommand.toggleLineNumbers(_:))),
+                                    ("view.documentMap", "Show Document Map", #selector(ViewOptionsCommand.toggleDocumentMap(_:)))] {
+            let toggle = item(id: id, title, action)
+            toggle.target = ViewOptionsCommand.shared
+            menu.addItem(toggle)
+        }
         // AppKit's own full-screen item has no Ctrl+Cmd+F on macOS 27
         // (measured 2026-10-24), while TextEdit's key works. With this item
         // in the menu AppKit adds no second one.
@@ -232,6 +241,17 @@ enum MainMenu {
         menu.addItem(item(id: "window.previousTab", "Show Previous Tab", #selector(NSWindow.selectPreviousTab(_:)), "\t",
                           [.control, .shift]))
         menu.addItem(item(id: "window.nextTab", "Show Next Tab", #selector(NSWindow.selectNextTab(_:)), "\t", [.control]))
+        menu.addItem(.separator())
+        // Tab 1 … Tab 8 and Last Tab (1.2.0): Ctrl+1 … Ctrl+9, as in Safari.
+        // The tag is the tab number (9: the last tab); TabNumberCommand
+        // selects it and turns the item off when there is no such tab.
+        for number in 1...9 {
+            let last = number == TabNumberCommand.lastTabTag
+            let tabItem = item(id: last ? "window.lastTab" : "window.tab\(number)", last ? "Last Tab" : "Tab \(number)",
+                               #selector(TabNumberCommand.selectTabByNumber(_:)), "\(number)", [.control], tag: number)
+            tabItem.target = TabNumberCommand.shared
+            menu.addItem(tabItem)
+        }
         menu.addItem(.separator())
         menu.addItem(item(id: "window.bringAllToFront", "Bring All to Front", #selector(NSApplication.arrangeInFront(_:))))
         return menu
@@ -302,5 +322,47 @@ final class ShareMenuValidator: NSObject, NSMenuDelegate {
         Self.shareItem(in: menu)?.isEnabled = Self.canShare(frontDocument)
         let close = menu.items.first { ($0.representedObject as? MenuCommand)?.id == "file.close" }
         close?.title = TabCommands.closeTitle(for: closeTarget())
+    }
+}
+
+/// View > Show Line Numbers and Show Document Map (1.2.0). Each flips its
+/// setting (Defaults.showLineNumbersKey, showDocumentMapKey) and every
+/// open document window follows at once. The check mark shows the setting.
+@MainActor
+final class ViewOptionsCommand: NSObject, NSMenuItemValidation {
+    static let shared = ViewOptionsCommand()
+
+    @objc func toggleLineNumbers(_ sender: Any?) { flip(Defaults.showLineNumbersKey) }
+
+    @objc func toggleDocumentMap(_ sender: Any?) { flip(Defaults.showDocumentMapKey) }
+
+    private func flip(_ key: String) {
+        Defaults.store.set(!Defaults.store.bool(forKey: key), forKey: key)
+        Self.updateWindows()
+    }
+
+    /// Every document window shows or hides its gutter and map again.
+    static func updateWindows() {
+        for window in NSApp.windows {
+            (window.windowController as? DocumentWindowController)?.updateGutterAndMap()
+        }
+    }
+
+    /// The check mark shows the setting. Both items are off while the
+    /// document window in front holds a large file, which never shows the
+    /// gutter or the map.
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        switch menuItem.action {
+        case #selector(toggleLineNumbers(_:)):
+            menuItem.state = Defaults.store.bool(forKey: Defaults.showLineNumbersKey) ? .on : .off
+        case #selector(toggleDocumentMap(_:)):
+            menuItem.state = Defaults.store.bool(forKey: Defaults.showDocumentMapKey) ? .on : .off
+        default:
+            return true
+        }
+        let front = [NSApp.mainWindow].compactMap { $0 }.first { $0.windowController is DocumentWindowController }
+            ?? TabCommands.frontDocumentWindow()
+        let document = (front?.windowController as? DocumentWindowController)?.document as? TextDocument
+        return document?.isLargeFile != true
     }
 }

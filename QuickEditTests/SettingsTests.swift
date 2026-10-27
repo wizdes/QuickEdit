@@ -48,7 +48,6 @@ final class SettingsTests: XCTestCase {
             .checkSpellingWhileTyping: "Check spelling as you type",
             .checkGrammarWithSpelling: "Check grammar with spelling",
             .correctSpellingAutomatically: "Correct spelling automatically",
-            .dataDetectors: "Data detectors",
             .smartCopyPaste: "Smart copy/paste",
             .smartQuotes: "Smart quotes",
             .smartDashes: "Smart dashes",
@@ -116,7 +115,7 @@ final class SettingsTests: XCTestCase {
 
     func testEveryCheckboxWritesItsDefault() throws {
         let controller = makeController()
-        XCTAssertEqual(controller.checkboxes.count, 10)
+        XCTAssertEqual(controller.checkboxes.count, 9) // 10 before 1.2.0 removed Data detectors
         for (key, box) in controller.checkboxes {
             let before = Defaults.bool(key)
             XCTAssertEqual(box.state == .on, before, "\(key.rawValue) shows the wrong state")
@@ -247,6 +246,8 @@ final class SettingsTests: XCTestCase {
         Defaults.store.set(5, forKey: DefaultsKey.autosavingDelay.rawValue)
         Defaults.store.set(true, forKey: DefaultsKey.numberPagesWhenPrinting.rawValue)
         Defaults.store.set(false, forKey: DefaultsKey.wrapToFitWhenPrinting.rawValue)
+        // No checkbox since 1.2.0, still a registered key that Restore All clears.
+        Defaults.store.set(true, forKey: DefaultsKey.dataDetectors.rawValue)
         controller.setPlainTextFont(try XCTUnwrap(NSFont(name: "Courier", size: 20)))
 
         let registered = Defaults.registeredValues()
@@ -273,7 +274,9 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(controller.heightField?.integerValue, 30)
         XCTAssertEqual(controller.openEncodingPopUp?.indexOfSelectedItem, 0)
         XCTAssertEqual(controller.saveEncodingPopUp?.indexOfSelectedItem, 0)
-        XCTAssertEqual(controller.fontNameField?.stringValue, SettingsWindowController.fontDescription(systemFont))
+        // 1.2.0: with no picked font, the plain font is the system's at 13 pt.
+        XCTAssertEqual(controller.fontNameField?.stringValue, SettingsWindowController.fontDescription(TextViewFactory.plainFont()))
+        XCTAssertEqual(TextViewFactory.plainFont().pointSize, 13)
     }
 
     /// The window follows a default changed elsewhere (TextEdit's bindings did).

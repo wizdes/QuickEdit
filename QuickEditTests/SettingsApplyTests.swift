@@ -91,7 +91,7 @@ final class SettingsApplyTests: XCTestCase {
             (.smartCopyPaste, { $0.smartInsertDeleteEnabled }),
             (.smartQuotes, { $0.isAutomaticQuoteSubstitutionEnabled }),
             (.smartDashes, { $0.isAutomaticDashSubstitutionEnabled }),
-            (.dataDetectors, { $0.isAutomaticDataDetectionEnabled }),
+            // Data detectors: no checkbox since 1.2.0 (always off).
             (.textReplacement, { $0.isAutomaticTextReplacementEnabled }),
         ]
         let before = flags.map { $0.1(windowA.textView) }

@@ -80,7 +80,8 @@ final class OpenPathTests: XCTestCase {
         TextDocument.largeFileThreshold = text.count
         let (document, controller) = try open(text, name: "small.txt")
         XCTAssertFalse(document.isLargeFile)
-        XCTAssertEqual(checks(controller.textView), [true, true, true, true, true, true, true])
+        // Data detection (6th) is always off in new windows since 1.2.0.
+        XCTAssertEqual(checks(controller.textView), [true, true, true, true, true, false, true])
         XCTAssertEqual(controller.window?.title, "small.txt")
     }
 

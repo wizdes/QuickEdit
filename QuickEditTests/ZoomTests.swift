@@ -59,9 +59,12 @@ final class ZoomTests: XCTestCase {
 
     func testViewMenuItems() throws {
         let menu = try viewMenu()
-        XCTAssertEqual(menu.items.map(\.title), ["Actual Size", "Zoom In", "Zoom Out", "", "Enter Full Screen"])
+        // 1.2.0 added Show Line Numbers and Show Document Map.
+        XCTAssertEqual(menu.items.map(\.title), ["Actual Size", "Zoom In", "Zoom Out", "", "Show Line Numbers",
+                                                 "Show Document Map", "", "Enter Full Screen"])
         XCTAssertTrue(menu.items[3].isSeparatorItem)
-        let fullScreen = menu.items[4]
+        XCTAssertTrue(menu.items[6].isSeparatorItem)
+        let fullScreen = menu.items[7]
         XCTAssertEqual(fullScreen.action, #selector(NSWindow.toggleFullScreen(_:)))
         XCTAssertEqual(fullScreen.keyEquivalent, "f")
         XCTAssertEqual(fullScreen.keyEquivalentModifierMask, [.command, .control])
@@ -152,7 +155,8 @@ final class ZoomTests: XCTestCase {
         document.makeWindowControllers()
         defer { document.close() }
         let controller = try XCTUnwrap(document.windowControllers.first as? DocumentWindowController)
-        XCTAssertTrue(controller.window?.contentView === controller.scrollView)
+        // Since 1.2.0 the scroll view sits in a container beside the map.
+        XCTAssertTrue(controller.scrollView.superview === controller.window?.contentView)
         choose(try item("Zoom In"), from: controller.textView)
         XCTAssertEqual(controller.scrollView.magnification, 2.0)
     }

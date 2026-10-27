@@ -8,7 +8,9 @@
 #                                     limits (Select Line 200 ms both ways, Wrap to Page 300 ms,
 #                                     no main-thread block over 100 ms after it or during a 10 MB
 #                                     PDF export, export memory under 2x the text (Wrap to Page: pages laid out first), line-ending
-#                                     count of 100 MB 100 ms, Wrap to Page typing p95 8 ms; 1 GB opens
+#                                     count of 100 MB 100 ms, Wrap to Page typing p95 8 ms; 1.2.0: typing
+#                                     with the gutter and map p95 8 ms, Return in 49 MB p95 8 ms, 10 MB
+#                                     paste 200 ms; 1 GB opens
 #                                     read-only and 512 MB editable, each with no main-thread block
 #                                     over 200 ms and a peak under 1.5 GB, and a 1 GB reload within the
 #                                     same limits: needs about 2 GB free disk)
@@ -160,7 +162,7 @@ make_fixtures() {
     local name
     for name in open-type-save new-save boundary ext-on ext-off ext-md ext-replace open-panel shots \
         transient external-clean external-edited locked close-named close-untitled \
-        rename-move rename-move/dest restore recent cascade revert encodings dark-mode sandbox-restore; do
+        rename-move rename-move/dest restore recent cascade revert encodings dark-mode sandbox-restore gutter-map; do
         mkdir -p "$dir/$name"
     done
     printf 'abc\n' >"$dir/open-type-save/hello.txt"
@@ -193,6 +195,10 @@ make_fixtures() {
     # The dark mode test opens this instead of typing 540 characters
     # (QuickEditUITests/LayoutTests.swift, testDarkModeKeepsTextReadable).
     awk 'BEGIN { for (i = 0; i < 20; i++) printf "readable text in dark mode\n" }' >"$dir/dark-mode/dark.txt"
+    # 1.2.0: about 60 lines of code-like text for the gutter and map
+    # screenshot (QuickEditUITests/SublimeFeaturesUITests.swift).
+    awk 'BEGIN { for (i = 1; i <= 60; i++) { if (i % 10 == 1) printf "func step%d() {\n", i; else if (i % 10 == 0) printf "}\n"; else printf "    let value%d = compute(%d) // line %d\n", i, i * 7, i } }' \
+        >"$dir/gutter-map/sixty.txt"
     # About 1 MB of numbered lines; the restoration test selects line 13000.
     awk 'BEGIN { for (i = 0; i < 26000; i++) printf "line %d of the restoration fixture\n", i }' \
         >"$dir/restore/restore-1mb.txt"
@@ -413,7 +419,7 @@ case "$cmd" in
         # The 1 GB and 512 MB open tests (M8, vote V3) run only with this
         # set; they make their files in a temp folder and delete them.
         export TEST_RUNNER_QE_BIG_FILE_TESTS=1
-        run_tests "QuickEditTests/LargeFileSpeedTests/testOneGigabyteOpensReadOnlyWithinTheLimits QuickEditTests/LargeFileSpeedTests/testHalfGigabyteOpensEditableWithinTheLimits QuickEditTests/LargeFileSpeedTests/testOneGigabyteReloadStaysWithinTheLimits QuickEditTests/LinePanelTests/testSelectLineOneMillionIn100MB QuickEditTests/LinePanelTests/testSelectLineBackNearlyOneMillionIn100MB QuickEditTests/PageModeTests/testTenMegabyteSwitchTime QuickEditTests/WrapToPageStallTests/testTenMegabyteNoStallAfterSwitch QuickEditTests/PrintTests/testTenMegabyteExportKeepsTheWindowResponsive QuickEditTests/PrintTests/testTenMegabyteExportInWrapToPageKeepsTheWindowResponsive QuickEditTests/PrintTests/testTenMegabyteExportInWrapToPageStaysUnderTwiceTheText QuickEditTests/PlainTextIOTests/testLineEndingCountOf100MBIsFast QuickEditTests/TypingSpeedTests/testWrapToPageTypingAtTheStartOf100MB" speed
+        run_tests "QuickEditTests/LargeFileSpeedTests/testOneGigabyteOpensReadOnlyWithinTheLimits QuickEditTests/LargeFileSpeedTests/testHalfGigabyteOpensEditableWithinTheLimits QuickEditTests/LargeFileSpeedTests/testOneGigabyteReloadStaysWithinTheLimits QuickEditTests/LinePanelTests/testSelectLineOneMillionIn100MB QuickEditTests/LinePanelTests/testSelectLineBackNearlyOneMillionIn100MB QuickEditTests/PageModeTests/testTenMegabyteSwitchTime QuickEditTests/WrapToPageStallTests/testTenMegabyteNoStallAfterSwitch QuickEditTests/PrintTests/testTenMegabyteExportKeepsTheWindowResponsive QuickEditTests/PrintTests/testTenMegabyteExportInWrapToPageKeepsTheWindowResponsive QuickEditTests/PrintTests/testTenMegabyteExportInWrapToPageStaysUnderTwiceTheText QuickEditTests/PlainTextIOTests/testLineEndingCountOf100MBIsFast QuickEditTests/TypingSpeedTests/testWrapToPageTypingAtTheStartOf100MB QuickEditTests/TypingSpeedTests/testTypingAtTheEndOf10MBDefaultView QuickEditTests/TypingSpeedTests/testReturnNearTheStartOf49MBIndexed QuickEditTests/TypingSpeedTests/testPasting10MBIntoAnEmptyDocument" speed
         echo "SPEED (medians, limits in brackets):"
         grep -E "^Select Line 1,000,000 in 100 MB" "$TEST_LOG" | head -1 | sed -E 's/.*(median [0-9.]+ ms).*/  Select Line forward, 1,000,000 lines of 100 MB: \1 [200 ms]/'
         grep -E "^Select Line -999999 from the end" "$TEST_LOG" | head -1 | sed -E 's/.*(median [0-9.]+ ms).*/  Select Line backward, -999999 from the end: \1 [200 ms]/'
@@ -424,6 +430,11 @@ case "$cmd" in
         grep -E "^M8-N6 10 MB Wrap to Page export after its pages" "$TEST_LOG" | head -1 | sed -E 's/.*(peak footprint [^ ]+ MB) \(text ([0-9]+) MB in memory\); the ([0-9]+) pages themselves ([^ ]+ MB).*/  10 MB export, Wrap to Page, pages laid out first: \1 [2x the \2 MB text]; the \3 pages took \4/'
         grep -E "^M8-N2 line-ending count" "$TEST_LOG" | sed -E 's/^M8-N2 line-ending count, 100 MB of ([A-Z]+) lines: ([0-9.]+ ms).*/  Line-ending count, 100 MB of \1 lines: \2 [100 ms]/'
         grep -E "^slow keys.*M8-N7 100 MB Wrap to Page typing at the start" "$TEST_LOG" | head -1 | sed -E 's/.*total p50 ([0-9.]+) p95 ([0-9.]+) .*/  Wrap to Page typing at the start of 100 MB: p50 \1 ms, p95 \2 ms [p95 8 ms]/'
+        # 1.2.0: typing with the gutter and the map, Return in a fully
+        # indexed 49 MB file, and a 10 MB paste.
+        grep -E "^slow keys.*M12-TYPING 10 MB typing at the end, default view" "$TEST_LOG" | head -1 | sed -E 's/.*total p50 ([0-9.]+) p95 ([0-9.]+) .*/  Typing at the end of 10 MB, gutter and map on: p50 \1 ms, p95 \2 ms [p95 8 ms]/'
+        grep -E "^slow keys.*M12-RETURN" "$TEST_LOG" | head -1 | sed -E 's/.*total p50 ([0-9.]+) p95 ([0-9.]+) .*/  Return near the start of 49 MB, fully indexed: p50 \1 ms, p95 \2 ms [p95 8 ms]/'
+        grep -E "^M12-PASTE" "$TEST_LOG" | head -1 | sed -E 's/^M12-PASTE 10 MB into an empty document: total ([^;]*);.*/  Paste 10 MB into an empty document: \1 [200 ms]/'
         grep -E "^M8-V3 (1024|512) MB open" "$TEST_LOG" | sed -E 's/^M8-V3 ([0-9]+) MB open.*usable ([0-9]+ ms).*longest main-thread block \(window and first display\) ([0-9.]+ ms).*idle after ([0-9.]+ ms); first scroll ([0-9.]+ ms).*first key ([0-9.]+ ms); peak footprint ([0-9]+ MB).*read-only ([a-z]+) .*/  Open \1 MB (read-only \8): usable \2; main-thread block \3, idle gap \4, first scroll \5, first key \6 [200 ms]; peak \7 [1536 MB]/'
         # The limits apply only when the tests saw an optimized build.
         [ "$(grep -cE '^Select Line .*optimized \(-O\)' "$TEST_LOG")" -eq 2 ] \
@@ -438,6 +449,8 @@ case "$cmd" in
             || die "the line-ending count test did not run optimized (log: $TEST_LOG)"
         grep -qE 'M8-N7 100 MB Wrap to Page typing at the start.*optimized: true' "$TEST_LOG" \
             || die "the Wrap to Page typing test did not run optimized (log: $TEST_LOG)"
+        [ "$(grep -cE '(M12-TYPING 10 MB typing at the end, default view|M12-RETURN|^M12-PASTE).*optimized: true' "$TEST_LOG")" -eq 3 ] \
+            || die "the three 1.2.0 speed tests did not run optimized (log: $TEST_LOG)"
         grep -E "^M8-V3 1024 MB reload" "$TEST_LOG" | sed -E 's/^M8-V3 1024 MB reload, n=3 medians: (longest main-thread block [0-9.]+ ms).*(peak footprint [0-9]+ MB).*(clone at open [0-9.]+ ms).*(Save panel setup [0-9.]+ ms).*/  Reload 1024 MB: \1 [200 ms]; \2 [1536 MB]; \3; \4 [200 ms]/'
         grep -qE '^M8-V3 1024 MB reload.*optimized: true' "$TEST_LOG" \
             || die "the 1 GB reload test did not run optimized (log: $TEST_LOG)"

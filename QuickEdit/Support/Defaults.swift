@@ -60,11 +60,21 @@ enum Defaults {
     /// registered: the default set lives in MainMenu.swift.
     static let keyboardShortcutsKey = "KeyboardShortcuts"
 
-    /// Settings > New Document > Paper size (M7): a `PaperSize` raw value.
-    /// Not a TextEdit key (TextEdit took the size from Page Setup), so it
-    /// is kept out of `DefaultsKey`. It is registered, so Restore All
-    /// Defaults puts the region's size back.
+    /// The paper size for Wrap to Page and PDFs (M7): a `PaperSize` raw
+    /// value. Its Settings pop-up went in 1.2.0; the stored value (the
+    /// region's size unless set before) is still used. Not a TextEdit key
+    /// (TextEdit took the size from Page Setup), so it is kept out of
+    /// `DefaultsKey`. It is registered, so Restore All Defaults puts the
+    /// region's size back.
     static let paperSizeKey = "PaperSize"
+
+    /// View > Show Line Numbers (1.2.0): the gutter on the left of every
+    /// document window. Not a TextEdit key, so kept out of `DefaultsKey`.
+    static let showLineNumbersKey = "ShowLineNumbers"
+
+    /// View > Show Document Map (1.2.0): the map on the right of every
+    /// document window. Not a TextEdit key.
+    static let showDocumentMapKey = "ShowDocumentMap"
 
     /// TextEdit's `NoStringEncoding` (EncodingManager.h:54): "Automatic" or "none".
     static let noStringEncoding: Int = 0xFFFF_FFFF
@@ -85,18 +95,23 @@ enum Defaults {
             DefaultsKey.plainTextEncoding.rawValue: noStringEncoding,
             DefaultsKey.plainTextEncodingForWrite.rawValue: noStringEncoding,
             DefaultsKey.tabWidth.rawValue: 8,
-            DefaultsKey.checkSpellingWhileTyping.rawValue: true,
+            // Off, as in Sublime Text (1.2.0); TextEdit has them on.
+            DefaultsKey.checkSpellingWhileTyping.rawValue: false,
             DefaultsKey.checkGrammarWithSpelling.rawValue: false,
-            DefaultsKey.correctSpellingAutomatically.rawValue: NSSpellChecker.isAutomaticSpellingCorrectionEnabled,
+            DefaultsKey.correctSpellingAutomatically.rawValue: false,
             DefaultsKey.smartCopyPaste.rawValue: true,
             DefaultsKey.smartQuotes.rawValue: false,
             DefaultsKey.smartDashes.rawValue: false,
+            // No longer read (new windows always start with data detectors
+            // off, 1.2.0); kept registered so Restore All Defaults clears it.
             DefaultsKey.dataDetectors.rawValue: false,
             DefaultsKey.textReplacement.rawValue: NSSpellChecker.isAutomaticTextReplacementEnabled,
             DefaultsKey.autosavingDelay.rawValue: 30,
             DefaultsKey.numberPagesWhenPrinting.rawValue: false,
             DefaultsKey.wrapToFitWhenPrinting.rawValue: true,
             paperSizeKey: PaperSize.regionDefault(for: .current).rawValue,
+            showLineNumbersKey: true,
+            showDocumentMapKey: true,
             // Not a TextEdit key: QuickEdit always opens one untitled window at
             // launch instead of the app-centric Open panel (root's M1 item 7).
             "NSShowAppCentricOpenPanelInsteadOfUntitledFile": false,
@@ -106,7 +121,8 @@ enum Defaults {
     /// Settings > "Restore All Defaults" (reference/apple/Preferences.m:182-199):
     /// every registered key goes back to its registered value, every custom
     /// keyboard shortcut goes, and the plain
-    /// font goes back to the system's fixed-pitch font. `Encodings` has no
+    /// font goes back to the system's fixed-pitch font at 13 pt
+    /// (TextViewFactory.plainFont). `Encodings` has no
     /// registered value, so the encodings list stays, as in TextEdit.
     @MainActor
     static func restoreAll() {

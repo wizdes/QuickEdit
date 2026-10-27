@@ -198,11 +198,99 @@ final class TextDocument: NSDocument {
 
     /// An edit ends the transient state (Document.m:998-1004). The first
     /// edit of a lossily loaded file asks before it can be written over.
-    override func updateChangeCount(_ change: NSDocument.ChangeType) {
-        isTransient = false
+    /// AppKit also calls this on a background thread while it restores an
+    /// autosaved untitled document at launch (canConcurrentlyReadDocuments);
+    /// the main-actor check then stopped the app (found 2026-10-26). There
+    /// is nothing to end or ask then: the window does not exist yet.
+    override nonisolated func updateChangeCount(_ change: NSDocument.ChangeType) {
+        guard Thread.isMainThread else {
+            super.updateChangeCount(change)
+            return
+        }
+        MainActor.assumeIsolated { isTransient = false }
         super.updateChangeCount(change)
+        MainActor.assumeIsolated { updateRestorable() }
         if change == .changeDone || change == .changeRedone {
-            confirmEditingLossyFile()
+            MainActor.assumeIsolated { confirmEditingLossyFile() }
+        }
+    }
+
+    // MARK: Blank untitled documents (1.2.0)
+
+    /// At most this many characters (UTF-16 units, about 1 MB of plain
+    /// text) are read to decide whether an untitled text is blank. A longer
+    /// text counts as not blank, so a huge text never stalls a close.
+    static let blankScanLimit = 1_048_576
+
+    /// No file yet, and the text is empty or only whitespace and line
+    /// ends (`CharacterSet.whitespacesAndNewlines`).
+    var isBlankUntitled: Bool {
+        guard fileURL == nil, textStorage.length <= Self.blankScanLimit else { return false }
+        let string = textStorage.string as NSString
+        return string.rangeOfCharacter(from: CharacterSet.whitespacesAndNewlines.inverted).location == NSNotFound
+    }
+
+    /// Forgets the edits of a blank untitled document and removes its
+    /// autosaved copy, so nothing asks to save it and the next launch does
+    /// not bring it back.
+    /// A blank untitled window stays off the saved window list: AppKit
+    /// writes that list before Quit reaches QuickEdit, and with only the
+    /// autosaved copy gone the next launch brought the window back as an
+    /// empty tab (measured 2026-10-26). Kept current on each change; the
+    /// check stops at the first character that is not whitespace.
+    func updateRestorable() {
+        let restorable = !isBlankUntitled
+        for controller in windowControllers where controller.window?.isRestorable != restorable {
+            controller.window?.isRestorable = restorable
+        }
+    }
+
+    func discardBlankUntitled() {
+        updateChangeCount(.changeCleared)
+        updateRestorable()
+        guard let url = autosavedContentsFileURL else { return }
+        autosavedContentsFileURL = nil
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch {
+            // The window still closes; the copy may then come back at the
+            // next launch, so say so.
+            FileHandle.standardError.write(Data("QuickEdit: could not remove the autosaved copy \(url.path) of a blank untitled document: \(error)\n".utf8))
+        }
+    }
+
+    /// Close (and Quit, which AppKit sends here for each document): a
+    /// blank untitled document closes at once with no save sheet.
+    override func canClose(withDelegate delegate: Any, shouldClose shouldCloseSelector: Selector?,
+                           contextInfo: UnsafeMutableRawPointer?) {
+        guard isBlankUntitled else {
+            return super.canClose(withDelegate: delegate, shouldClose: shouldCloseSelector, contextInfo: contextInfo)
+        }
+        discardBlankUntitled()
+        Self.reply(to: delegate, shouldClose: shouldCloseSelector, document: self, true, contextInfo)
+    }
+
+    /// Calls `delegate`'s `document:shouldClose:contextInfo:` callback, as
+    /// NSDocument's own canClose does.
+    static func reply(to delegate: Any, shouldClose selector: Selector?, document: NSDocument, _ shouldClose: Bool,
+                      _ contextInfo: UnsafeMutableRawPointer?) {
+        guard let selector, let object = delegate as? NSObject, object.responds(to: selector) else { return }
+        typealias Callback = @convention(c) (AnyObject, Selector, NSDocument, ObjCBool, UnsafeMutableRawPointer?) -> Void
+        let callback = unsafeBitCast(object.method(for: selector), to: Callback.self)
+        callback(object, selector, document, ObjCBool(shouldClose), contextInfo)
+    }
+
+    /// Quit: every blank untitled document is dropped before AppKit
+    /// reviews (or autosaves) the others. DocumentController's review
+    /// keeps the windows (`closing: false`: the user may still cancel the
+    /// quit); the app delegate's terminate check, once the quit is
+    /// decided, closes them too.
+    static func discardBlankUntitledDocuments(closing: Bool = true) {
+        for case let document as TextDocument in NSDocumentController.shared.documents where document.isBlankUntitled {
+            document.discardBlankUntitled()
+            document.invalidateRestorableState()
+            if closing { document.close() }
         }
     }
 

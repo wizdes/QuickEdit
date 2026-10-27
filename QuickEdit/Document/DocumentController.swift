@@ -105,6 +105,15 @@ final class DocumentController: NSDocumentController {
         return document
     }
 
+    /// Quit (1.2.0): blank untitled documents go first, with no question
+    /// and no autosaved copy, so they do not come back at the next launch.
+    override func reviewUnsavedDocuments(withAlertTitle title: String?, cancellable: Bool, delegate: Any?,
+                                         didReviewAllSelector: Selector?, contextInfo: UnsafeMutableRawPointer?) {
+        TextDocument.discardBlankUntitledDocuments(closing: false)
+        super.reviewUnsavedDocuments(withAlertTitle: title, cancellable: cancellable, delegate: delegate,
+                                     didReviewAllSelector: didReviewAllSelector, contextInfo: contextInfo)
+    }
+
     /// A second document ends the first one's transient state.
     override func addDocument(_ document: NSDocument) {
         if documents.count == 1, let first = documents.first as? TextDocument, first.isTransient {

@@ -12,11 +12,12 @@ final class TextEditDefaultsTests: XCTestCase {
         Defaults.registeredValues()[key.rawValue] as? Bool
     }
 
+    /// 1.2.0 (Sublime Text defaults): spelling and auto-correct are off,
+    /// where TextEdit has spelling on and auto-correct from the system.
     func testSpellingAndGrammarMatchTextEdit() {
-        XCTAssertEqual(registered(.checkSpellingWhileTyping), true, "TextEdit: check spelling while typing YES")
+        XCTAssertEqual(registered(.checkSpellingWhileTyping), false, "1.2.0: check spelling while typing off")
         XCTAssertEqual(registered(.checkGrammarWithSpelling), false, "TextEdit: grammar NO")
-        XCTAssertEqual(registered(.correctSpellingAutomatically), NSSpellChecker.isAutomaticSpellingCorrectionEnabled,
-                       "TextEdit: autocorrect from the system setting")
+        XCTAssertEqual(registered(.correctSpellingAutomatically), false, "1.2.0: auto-correct off")
     }
 
     func testSubstitutionsMatchTextEdit() {

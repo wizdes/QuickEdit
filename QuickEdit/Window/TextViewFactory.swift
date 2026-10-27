@@ -4,9 +4,33 @@ import AppKit
 /// Always storage -> NSLayoutManager -> NSTextContainer -> NSTextView(frame:textContainer:);
 /// never the frame-only NSTextView initializer, which makes a TextKit 2 view.
 enum TextViewFactory {
-    /// The plain-text font: the user's fixed-pitch font at its default size.
+    /// The plain-text size when the user has not picked a font (1.2.0, as
+    /// Sublime Text); AppKit's own default is 11 pt.
+    static let defaultPlainFontSize: CGFloat = 13
+
+    /// The defaults key AppKit saves a picked fixed-pitch font under
+    /// (`NSFont.setUserFixedPitch`).
+    static let userFixedPitchFontKey = "NSFixedPitchFont"
+
+    /// The user picked a plain-text font (Settings > Change…, or a font
+    /// set for every app). Read from the saved app and global domains
+    /// only: AppKit registers a default for the key, so UserDefaults and
+    /// CFPreferences always return one (measured 2026-10-26: "Menlo-Regular").
+    static var userPickedPlainFont: Bool {
+        let defaults = UserDefaults.standard
+        let app = Bundle.main.bundleIdentifier.flatMap { defaults.persistentDomain(forName: $0) }
+        return app?[userFixedPitchFontKey] != nil
+            || defaults.persistentDomain(forName: UserDefaults.globalDomain)?[userFixedPitchFontKey] != nil
+    }
+
+    /// The plain-text font: the font the user picked in Settings, at its
+    /// size; otherwise the system's fixed-pitch font at 13 pt.
     static func plainFont() -> NSFont {
-        NSFont.userFixedPitchFont(ofSize: 0) ?? NSFont.monospacedSystemFont(ofSize: 0, weight: .regular)
+        if userPickedPlainFont, let picked = NSFont.userFixedPitchFont(ofSize: 0) {
+            return picked
+        }
+        return NSFont.userFixedPitchFont(ofSize: defaultPlainFontSize)
+            ?? NSFont.monospacedSystemFont(ofSize: defaultPlainFontSize, weight: .regular)
     }
 
     /// Width of one "x" in the plain font, measured with string sizing.
@@ -124,7 +148,10 @@ enum TextViewFactory {
         textView.smartInsertDeleteEnabled = Defaults.bool(.smartCopyPaste)
         textView.isAutomaticQuoteSubstitutionEnabled = Defaults.bool(.smartQuotes)
         textView.isAutomaticDashSubstitutionEnabled = Defaults.bool(.smartDashes)
-        textView.isAutomaticDataDetectionEnabled = Defaults.bool(.dataDetectors)
+        // Data detectors are always off in new windows (1.2.0): the
+        // Settings checkbox is gone; Edit > Substitutions still turns
+        // them on for one window.
+        textView.isAutomaticDataDetectionEnabled = false
         textView.isAutomaticTextReplacementEnabled = Defaults.bool(.textReplacement)
     }
 

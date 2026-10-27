@@ -104,7 +104,9 @@ final class M8ReviewFixTests: XCTestCase {
     }
 
     private let allOff = [false, false, false, false, false, false, false]
-    private let allOn = [true, true, true, true, true, true, true]
+    /// Every setting on; data detection (6th) stays off: since 1.2.0 new
+    /// windows always start with it off.
+    private let allOn = [true, true, true, true, true, false, true]
     private let smallText = String(repeating: "small\n", count: 10)        // 60 bytes
     private let largeText = String(repeating: "large file line\n", count: 100) // 1,600 bytes
 
@@ -169,7 +171,7 @@ final class M8ReviewFixTests: XCTestCase {
         try replaceOnDisk(document, with: largeText, by: .reload)
         XCTAssertEqual(checks(controller.textView), allOff)
         try replaceOnDisk(document, with: smallText + "more\n", by: .revert)
-        XCTAssertEqual(checks(controller.textView), [false, true, true, true, true, true, true])
+        XCTAssertEqual(checks(controller.textView), [false, true, true, true, true, false, true])
     }
 
     // MARK: Row 5: PDF layout managers off the main thread
