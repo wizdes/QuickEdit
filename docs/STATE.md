@@ -1,11 +1,17 @@
 # QuickEdit state
 
-Rewritten at each milestone, never appended. Last rewrite: 2026-10-28, version 1.2.2.
+Rewritten at each milestone, never appended. Last rewrite: 2026-10-28, version 1.2.3.
 
-Milestone: 1.2.2 (user request: Tab 1 to Tab 9 on Cmd+1 to Cmd+9 and Last Tab on Cmd+0, was Ctrl; Zoom In Cmd+=, Zoom Out Cmd+-, Actual Size Cmd+., was Shift+Cmd+. / Shift+Cmd+, / Cmd+0) done. Next: the POST_MVP.md list, only when the user asks. Auto-update options researched (docs/research/autoupdate-options.html, pick Sparkle 2); the user chose to release without it for now.
+Milestone: 1.2.3 (user request: a window resized by hand sets the size of new windows, saved to WidthInChars and HeightInChars) done. Next: the POST_MVP.md list, only when the user asks. Auto-update options researched (docs/research/autoupdate-options.html, pick Sparkle 2); the user chose to release without it for now.
 Branch / worktree / commit: dev is merged into main at each release. Work continues on dev (worktrees/dev).
 Unmerged work: none.
-Releases: 1.0 (2026-10-25); 1.0.1 (2026-10-26: About credit and README, repo made public, page at https://yili.dev/projects/quickedit/); 1.1.0 (2026-10-26: tabs); 1.2.0 (2026-10-26, tag on 05f87ca, DMG SHA-256 d69d92a2...6b51); 1.2.1 (2026-10-27, tag on 32d1936, DMG SHA-256 7d1ed999...7322); 1.2.2 (2026-10-28, DMG SHA-256 0fa0c813...7604).
+Releases: 1.0 (2026-10-25); 1.0.1 (2026-10-26: About credit and README, repo made public, page at https://yili.dev/projects/quickedit/); 1.1.0 (2026-10-26: tabs); 1.2.0 (2026-10-26, tag on 05f87ca, DMG SHA-256 d69d92a2...6b51); 1.2.1 (2026-10-27, tag on 32d1936, DMG SHA-256 7d1ed999...7322); 1.2.2 (2026-10-28, DMG SHA-256 0fa0c813...7604); 1.2.3 (2026-10-28, DMG SHA-256 53c256a2...5211).
+
+1.2.3 checks:
+- Builder: a native Opus builder (runner sandbox cannot run Xcode). Root reviewed the diff; no outside review (small change).
+- windowDidEndLiveResize saves the text area as columns and rows of the new-document font at actual size (zoom divided out). Nothing saves in Wrap to Page, in full screen, or on code-driven frame changes.
+- WindowSizeMemoryTests 7 of 7. Unit 523 of 524 (the speech test, passed alone). Full run at the release 597 of 597.
+- Choices to check: no Settings switch to turn this off; a document whose font differs from the new-document font is counted in new-document characters.
 
 1.2.2 checks:
 - Fast lane, root edit, no builder or review (default key values only). Tests first: 7 of 38 failed on the old keys, then passed.
