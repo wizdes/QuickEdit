@@ -986,6 +986,33 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
         recordViewSize()
     }
 
+    /// The user finished resizing by hand: the text area, in characters and
+    /// lines at actual size, becomes the size of new windows (Settings >
+    /// New Document > Window Size). Code-driven frame changes never end a
+    /// live resize, so they do not save.
+    func windowDidEndLiveResize(_ notification: Notification) {
+        guard let size = textSizeInCharacters() else { return }
+        if Defaults.integer(.widthInChars) != size.columns {
+            Defaults.store.set(size.columns, forKey: DefaultsKey.widthInChars.rawValue)
+        }
+        if Defaults.integer(.heightInChars) != size.rows {
+            Defaults.store.set(size.rows, forKey: DefaultsKey.heightInChars.rawValue)
+        }
+    }
+
+    /// The text area in characters of the new-document font, the reverse of
+    /// `TextViewFactory.initialContentSize()`. Nil in Wrap to Page (sized for
+    /// the page) and in full screen (sized for the screen).
+    func textSizeInCharacters() -> (columns: Int, rows: Int)? {
+        guard !hasMultiplePages, let window, !window.styleMask.contains(.fullScreen) else { return nil }
+        let font = TextViewFactory.plainFont()
+        let scale = max(scrollView.magnification, ScalingScrollView.minimumScale)
+        let area = currentViewSize(scrollerStyle: scrollView.scrollerStyle)
+        let columns = Int((area.width / scale / TextViewFactory.xAdvance(of: font)).rounded())
+        let rows = Int((area.height / scale / TextViewFactory.lineHeight(of: font)).rounded())
+        return (min(max(columns, 1), 10_000), min(max(rows, 1), 10_000))
+    }
+
     func windowDidMove(_ notification: Notification) {
         (document as? TextDocument)?.isTransient = false
     }
