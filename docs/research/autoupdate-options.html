@@ -1,0 +1,349 @@
+<title>QuickEdit Auto-Update Options</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Public+Sans:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one reading column; a decision box on top, then the constraint, the flow diagram, the comparison table, one card per option. */
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --fg: #1b2230;
+  --muted: #5b6577;
+  --line: #dde1e8;
+  --accent: #1f5f8b;
+  --accent-soft: #e3eef6;
+  --good: #1d7a4a;
+  --good-soft: #e2f3ea;
+  --warn: #9a6200;
+  --warn-soft: #fbf0dc;
+  --bad: #a33a3a;
+  --bad-soft: #f8e4e4;
+  --font-display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+  --font-body: "Public Sans", -apple-system, "Helvetica Neue", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12161d; --surface: #1a2029; --fg: #e4e8ef; --muted: #9aa5b6; --line: #2c3442;
+    --accent: #6fb3e3; --accent-soft: #1c3346;
+    --good: #5fcf93; --good-soft: #17322a; --warn: #e8b35c; --warn-soft: #362a14; --bad: #ee8c8c; --bad-soft: #3a1e22;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12161d; --surface: #1a2029; --fg: #e4e8ef; --muted: #9aa5b6; --line: #2c3442;
+  --accent: #6fb3e3; --accent-soft: #1c3346;
+  --good: #5fcf93; --good-soft: #17322a; --warn: #e8b35c; --warn-soft: #362a14; --bad: #ee8c8c; --bad-soft: #3a1e22;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font-body); font-size: 16px; line-height: 1.6;
+}
+.wrap {
+  max-width: 980px; margin: 0 auto;
+  padding-block: 40px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 40px;
+}
+h1, h2, h3 { font-family: var(--font-display); line-height: 1.15; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(30px, 5vw, 44px); font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: 26px; font-weight: 700; }
+h3 { font-size: 19px; font-weight: 700; }
+p { margin: 0; max-width: 68ch; }
+a { color: var(--accent); }
+code { font-family: var(--font-mono); font-size: 0.86em; background: var(--accent-soft); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+section { display: grid; gap: 16px; min-width: 0; }
+header { display: grid; gap: 12px; }
+.lede { font-size: 18px; color: var(--muted); }
+
+.decide {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  padding: 24px; display: grid; gap: 16px;
+  box-shadow: 0 1px 0 var(--line);
+}
+.decide .q { font-size: 20px; font-family: var(--font-display); font-weight: 700; }
+.decide dl { display: grid; grid-template-columns: max-content 1fr; gap: 10px 20px; margin: 0; }
+.decide dt { font-weight: 600; }
+.decide dd { margin: 0; min-width: 0; }
+@media (max-width: 560px) { .decide dl { grid-template-columns: 1fr; gap: 4px; } .decide dd { margin-bottom: 10px; } }
+
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.fact { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; gap: 4px; align-content: start; }
+.fact b { font-family: var(--font-mono); font-size: 15px; }
+.fact span { color: var(--muted); font-size: 14px; }
+
+.diagram { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; overflow-x: auto; }
+.diagram svg { display: block; min-width: 720px; width: 100%; height: auto; }
+.diagram text { font-family: var(--font-body); }
+.caption { color: var(--muted); font-size: 14px; }
+
+.filter { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.filter button {
+  font: 600 14px var(--font-body); color: var(--fg); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; cursor: pointer;
+}
+.filter button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.filter button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 760px; font-size: 14.5px; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+tbody tr:last-child td { border-bottom: 0; }
+td.num { font-variant-numeric: tabular-nums; font-family: var(--font-mono); font-size: 13px; white-space: nowrap; }
+tr.rec td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.pill { display: inline-block; font-size: 12.5px; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+.pill.good { background: var(--good-soft); color: var(--good); }
+.pill.warn { background: var(--warn-soft); color: var(--warn); }
+.pill.bad { background: var(--bad-soft); color: var(--bad); }
+
+.cards { display: grid; gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; display: grid; gap: 12px; min-width: 0; }
+.card.rec { border-color: var(--accent); }
+.card-head { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: baseline; justify-content: space-between; }
+.card ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; max-width: 72ch; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.two > div { min-width: 0; display: grid; gap: 6px; align-content: start; }
+.two h4 { margin: 0; font-size: 13px; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+@media (max-width: 640px) { .two { grid-template-columns: 1fr; } }
+.card[hidden], tr[hidden] { display: none !important; }
+
+ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 8px; max-width: 72ch; }
+.sources { font-size: 14px; color: var(--muted); }
+.sources ul { padding-left: 20px; margin: 0; display: grid; gap: 4px; }
+.note { font-size: 14px; color: var(--muted); border-left: 2px solid var(--line); padding-left: 12px; }
+</style>
+
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">QuickEdit · research · 2026-10-28</div>
+  <h1>How should QuickEdit update itself?</h1>
+  <p class="lede">I compared 8 ways for a Mac app to get new versions to its users. QuickEdit runs in the App Sandbox and may not use the network. Only Sparkle is built for that.</p>
+</header>
+
+<div class="decide">
+  <div class="q">Pick one: Sparkle 2, a "new version" notice only, or the Mac App Store.</div>
+  <dl>
+    <dt>My pick</dt>
+    <dd><b>Sparkle 2.10.1.</b> It is the standard open source updater for Mac apps (MIT license). It works in a sandboxed app through two small helper processes that ship inside it. QuickEdit can keep its network block, because Sparkle's helper does the download.</dd>
+    <dt>Lighter choice</dt>
+    <dd><b>Notice only.</b> QuickEdit checks GitHub once a day and shows "QuickEdit 1.3 is out" with a Download button. You still drag the new app in by hand. This needs one new sandbox permission: network access.</dd>
+    <dt>After you pick</dt>
+    <dd>I write a short build plan for your OK. Adding Sparkle is Tier 3 work: it changes signing and the sandbox permissions, and it needs a new signing key in <code>~/keys</code>. I will ask before I make that key.</dd>
+  </dl>
+</div>
+
+<section>
+  <h2>What QuickEdit looks like today</h2>
+  <div class="facts">
+    <div class="fact"><b>App Sandbox on</b><span>Exactly 2 permissions ship: the sandbox, and read/write of files you pick. A test checks this.</span></div>
+    <div class="fact"><b>No network</b><span>No <code>network.client</code> permission. The app can't call GitHub itself.</span></div>
+    <div class="fact"><b>2.3 MB DMG</b><span>QuickEdit-1.2.1.dmg on GitHub Releases, Developer ID signed and notarized.</span></div>
+    <div class="fact"><b>Built on this Mac</b><span>Releases come from <code>./build.sh dist</code>. CI is off.</span></div>
+  </div>
+  <p class="note">The sandbox is the deciding fact. A sandboxed app can't overwrite its own copy in /Applications. Every GitHub-only updater I found replaces the app from inside the running app, so none of them work here.</p>
+</section>
+
+<section>
+  <h2>How Sparkle would work in QuickEdit</h2>
+  <div class="diagram" role="img" aria-label="Sparkle update flow: QuickEdit asks the Downloader helper for the appcast feed, checks the signature, then the Installer helper swaps the app in Applications and relaunches it.">
+    <svg viewBox="0 0 960 300" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" style="fill: var(--muted)"/>
+        </marker>
+      </defs>
+      <!-- sandbox box -->
+      <rect x="16" y="20" width="560" height="200" rx="14" style="fill: var(--accent-soft); stroke: var(--accent)" stroke-dasharray="6 5"/>
+      <text x="34" y="46" style="fill: var(--accent); font-size: 13px; font-weight: 600">App Sandbox (no network, no write to /Applications)</text>
+
+      <rect x="40" y="76" width="160" height="110" rx="10" style="fill: var(--surface); stroke: var(--line)"/>
+      <text x="120" y="110" text-anchor="middle" style="fill: var(--fg); font-size: 16px; font-weight: 700">QuickEdit.app</text>
+      <text x="120" y="134" text-anchor="middle" style="fill: var(--muted); font-size: 12.5px">Sparkle.framework</text>
+      <text x="120" y="152" text-anchor="middle" style="fill: var(--muted); font-size: 12.5px">"Check for Updates…"</text>
+      <text x="120" y="170" text-anchor="middle" style="fill: var(--muted); font-size: 12.5px">checks the signature</text>
+
+      <rect x="290" y="62" width="240" height="56" rx="10" style="fill: var(--surface); stroke: var(--line)"/>
+      <text x="410" y="86" text-anchor="middle" style="fill: var(--fg); font-size: 14px; font-weight: 700">Downloader.xpc (196 KB)</text>
+      <text x="410" y="105" text-anchor="middle" style="fill: var(--muted); font-size: 12px">has network; fetches feed + DMG</text>
+
+      <rect x="290" y="146" width="240" height="56" rx="10" style="fill: var(--surface); stroke: var(--line)"/>
+      <text x="410" y="170" text-anchor="middle" style="fill: var(--fg); font-size: 14px; font-weight: 700">Installer.xpc (212 KB)</text>
+      <text x="410" y="189" text-anchor="middle" style="fill: var(--muted); font-size: 12px">starts the installer outside the sandbox</text>
+
+      <path d="M200 110 L286 92" style="stroke: var(--muted); fill: none" stroke-width="1.6" marker-end="url(#arr)"/>
+      <path d="M200 156 L286 172" style="stroke: var(--muted); fill: none" stroke-width="1.6" marker-end="url(#arr)"/>
+
+      <!-- outside -->
+      <rect x="640" y="30" width="300" height="80" rx="10" style="fill: var(--surface); stroke: var(--line)"/>
+      <text x="790" y="58" text-anchor="middle" style="fill: var(--fg); font-size: 14px; font-weight: 700">appcast.xml + QuickEdit-1.3.dmg</text>
+      <text x="790" y="78" text-anchor="middle" style="fill: var(--muted); font-size: 12px">on yili.dev or GitHub Releases</text>
+      <text x="790" y="96" text-anchor="middle" style="fill: var(--muted); font-size: 12px">each update signed with your EdDSA key</text>
+
+      <rect x="640" y="146" width="300" height="56" rx="10" style="fill: var(--surface); stroke: var(--line)"/>
+      <text x="790" y="170" text-anchor="middle" style="fill: var(--fg); font-size: 14px; font-weight: 700">/Applications/QuickEdit.app</text>
+      <text x="790" y="189" text-anchor="middle" style="fill: var(--muted); font-size: 12px">swapped when you quit, then relaunched</text>
+
+      <path d="M530 84 L636 70" style="stroke: var(--muted); fill: none" stroke-width="1.6" marker-end="url(#arr)"/>
+      <path d="M530 174 L636 174" style="stroke: var(--muted); fill: none" stroke-width="1.6" marker-end="url(#arr)"/>
+
+      <text x="16" y="262" style="fill: var(--fg); font-size: 13px; font-weight: 600">Order:</text>
+      <text x="70" y="262" style="fill: var(--muted); font-size: 13px">1 feed says 1.3 is out  →  2 you click Install  →  3 DMG downloads  →  4 signature checked  →  5 app swapped  →  6 relaunch</text>
+      <text x="16" y="286" style="fill: var(--muted); font-size: 12px">Sizes from Sparkle-for-Swift-Package-Manager.zip 2.10.1, measured on this Mac. The whole Sparkle.framework is 2.9 MB on disk (arm64 + x86_64).</text>
+    </svg>
+  </div>
+  <p class="caption">The sandbox needs one more permission line for this: a lookup exception for the names <code>dev.yili.QuickEdit-spks</code> and <code>dev.yili.QuickEdit-spki</code>. Both Info.plist switches go on: <code>SUEnableInstallerLauncherService</code> and <code>SUEnableDownloaderService</code>.</p>
+</section>
+
+<section>
+  <h2>All 8 options side by side</h2>
+  <div class="filter" role="group" aria-label="Filter options">
+    <button type="button" id="f-all" aria-pressed="true" data-f="all">Show all 8</button>
+    <button type="button" id="f-sandbox" aria-pressed="false" data-f="sandbox">Only ones that work with the sandbox on</button>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Option</th><th>Latest</th><th>License</th><th>Stars</th><th>Sandboxed app?</th><th>Installs for you?</th><th>Size in app</th></tr>
+      </thead>
+      <tbody>
+        <tr class="rec" data-sandbox="yes"><td><b>Sparkle 2</b> (my pick)</td><td class="num">2.10.1 · 2026-10-25</td><td>MIT</td><td class="num">9,851</td><td><span class="pill good">Yes, with 2 helpers</span></td><td><span class="pill good">Yes</span></td><td class="num">2.9 MB</td></tr>
+        <tr data-sandbox="yes"><td><b>Notice only</b> (own code)</td><td class="num">n/a</td><td>yours</td><td class="num">n/a</td><td><span class="pill warn">Needs network permission</span></td><td><span class="pill bad">No, you drag it in</span></td><td class="num">a few KB</td></tr>
+        <tr data-sandbox="yes"><td><b>Mac App Store</b></td><td class="num">n/a</td><td>Apple terms</td><td class="num">n/a</td><td><span class="pill good">Required there</span></td><td><span class="pill good">Yes, by macOS</span></td><td class="num">0</td></tr>
+        <tr data-sandbox="yes"><td><b>Homebrew cask</b> (own tap)</td><td class="num">n/a</td><td>BSD-2 (Homebrew)</td><td class="num">n/a</td><td><span class="pill good">Not affected</span></td><td><span class="pill warn">Only on <code>brew upgrade</code></span></td><td class="num">0</td></tr>
+        <tr data-sandbox="no"><td><b>mxcl/AppUpdater</b></td><td class="num">4.2.1 · 2026-10-07</td><td>Unlicense</td><td class="num">289</td><td><span class="pill bad">No</span></td><td><span class="pill good">Yes, silent</span></td><td class="num">small + 1 dep</td></tr>
+        <tr data-sandbox="no"><td><b>s1ntoneli/AppUpdater</b></td><td class="num">0.2.0 · 2025-10-10</td><td>MIT</td><td class="num">258</td><td><span class="pill bad">No (README says so)</span></td><td><span class="pill good">Yes, silent</span></td><td class="num">small</td></tr>
+        <tr data-sandbox="no"><td><b>One-file updater</b> (Flavio Copes style)</td><td class="num">n/a</td><td>yours</td><td class="num">n/a</td><td><span class="pill bad">No (post says so)</span></td><td><span class="pill good">Yes</span></td><td class="num">436 lines</td></tr>
+        <tr data-sandbox="no"><td><b>Squirrel.Mac</b></td><td class="num">0.3.2 · 2017-08-18</td><td>MIT</td><td class="num">1,693</td><td><span class="pill bad">No</span></td><td><span class="pill good">Yes</span></td><td class="num">1.2 MB zip</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="caption">Stars, versions and dates come from the GitHub API on 2026-10-28. Squirrel.Mac's last release is from 2017; Electron still uses it.</p>
+</section>
+
+<section>
+  <h2>Each option in detail</h2>
+  <div class="cards" id="cards">
+
+    <article class="card rec" data-sandbox="yes">
+      <div class="card-head"><h3>Sparkle 2</h3><span class="pill good">Works with the sandbox on</span></div>
+      <p>Most Mac apps sold outside the App Store use this. You publish a small feed file (the appcast) that lists versions. Sparkle reads it and shows the standard update window with release notes.</p>
+      <div class="two">
+        <div><h4>Good</h4><ul>
+          <li>Built for sandboxed apps; QuickEdit keeps its network block.</li>
+          <li>Each update is signed with your own EdDSA key, so a hacked GitHub account alone can't push a bad update.</li>
+          <li>Swaps the app when you quit; you are never cut off mid-edit.</li>
+          <li><code>generate_appcast</code> builds the feed and the signatures from a folder of DMGs.</li>
+          <li>Active: release 2.10.1 came out 3 days ago.</li>
+        </ul></div>
+        <div><h4>Costs</h4><ul>
+          <li>Adds 2.9 MB to an app whose DMG is 2.3 MB today.</li>
+          <li>One new sandbox permission line, so the sandbox test changes.</li>
+          <li>A new private key to keep in <code>~/keys</code>. If it is lost, old copies can't take updates.</li>
+          <li>The XPC helpers must be signed by hand in <code>build.sh</code>. Sparkle's docs warn against <code>codesign --deep</code>.</li>
+        </ul></div>
+      </div>
+    </article>
+
+    <article class="card" data-sandbox="yes">
+      <div class="card-head"><h3>Notice only</h3><span class="pill warn">Needs network permission</span></div>
+      <p>QuickEdit asks the GitHub releases API once a day. When a newer tag exists, it shows a small window with a Download button that opens the release page. Nothing is installed for you.</p>
+      <div class="two">
+        <div><h4>Good</h4><ul>
+          <li>No library, no new key, no new host.</li>
+          <li>Can't break the installed app, because it never touches it.</li>
+        </ul></div>
+        <div><h4>Costs</h4><ul>
+          <li>Adds the <code>network.client</code> permission. A text editor that can reach the network is a bigger change to explain than Sparkle's helper.</li>
+          <li>You still download, open the DMG and drag. That is the step people skip.</li>
+          <li>GitHub allows 60 unauthenticated API calls an hour per IP address.</li>
+        </ul></div>
+      </div>
+    </article>
+
+    <article class="card" data-sandbox="yes">
+      <div class="card-head"><h3>Mac App Store</h3><span class="pill good">Updates come from macOS</span></div>
+      <p>QuickEdit is already sandboxed, which the App Store requires. Apple ships updates the same way as for every other store app.</p>
+      <div class="two">
+        <div><h4>Good</h4><ul><li>No updater code at all.</li><li>Users find it in the store.</li></ul></div>
+        <div><h4>Costs</h4><ul><li>Each release waits for App Review.</li><li>A second release process beside the DMG, or a full move.</li><li>Not a library choice; a distribution choice.</li></ul></div>
+      </div>
+    </article>
+
+    <article class="card" data-sandbox="yes">
+      <div class="card-head"><h3>Homebrew cask in your own tap</h3><span class="pill warn">Only for brew users</span></div>
+      <p>A small Ruby file in a <code>wizdes/homebrew-tap</code> repo points at the DMG. People who install with <code>brew install --cask</code> get updates with <code>brew upgrade</code>.</p>
+      <div class="two">
+        <div><h4>Good</h4><ul><li>No change to the app.</li><li>Pairs well with any other choice here.</li></ul></div>
+        <div><h4>Costs</h4><ul><li>Helps only people who use Homebrew.</li><li>One more file to update at each release.</li></ul></div>
+      </div>
+    </article>
+
+    <article class="card" data-sandbox="no">
+      <div class="card-head"><h3>mxcl/AppUpdater</h3><span class="pill bad">Not with the sandbox on</span></div>
+      <p>A small Swift package that reads GitHub Releases, checks a DMG and replaces the running app. Its checks are strict: Developer ID, same Team ID, same bundle ID. QuickEdit's DMG name already fits its rule (<code>QuickEdit-1.2.1.dmg</code>).</p>
+      <div class="two">
+        <div><h4>Good</h4><ul><li>No feed and no extra key; GitHub Releases is the feed.</li><li>Optional proof that the DMG came from a GitHub Actions build.</li></ul></div>
+        <div><h4>Costs</h4><ul><li>Replaces the app from inside the running process. The sandbox blocks that, and the README doesn't mention sandboxed apps.</li><li>The build proof needs GitHub Actions; QuickEdit builds on this Mac.</li><li>No update window; you build that yourself.</li></ul></div>
+      </div>
+    </article>
+
+    <article class="card" data-sandbox="no">
+      <div class="card-head"><h3>s1ntoneli/AppUpdater</h3><span class="pill bad">Not with the sandbox on</span></div>
+      <p>A rewrite of mxcl's package with async/await and a SwiftUI settings view. Its README says: "Only non-sandboxed apps are supported."</p>
+    </article>
+
+    <article class="card" data-sandbox="no">
+      <div class="card-head"><h3>One-file updater</h3><span class="pill bad">Not with the sandbox on</span></div>
+      <p>Flavio Copes describes a 436-line Swift file with no dependencies. It checks GitHub daily, compares SHA-256 with GitHub's digest, checks the code signature, swaps the app and relaunches. His post says it is "for apps that aren't sandboxed".</p>
+    </article>
+
+    <article class="card" data-sandbox="no">
+      <div class="card-head"><h3>Squirrel.Mac</h3><span class="pill bad">Not a fit</span></div>
+      <p>The updater inside Electron. Its last release is 0.3.2 from 2017, and it expects a server that answers "is there an update" requests.</p>
+    </article>
+  </div>
+</section>
+
+<section>
+  <h2>If you pick Sparkle, the work looks like this</h2>
+  <ol class="steps">
+    <li>Add Sparkle 2.10.1 as a Swift package and add "Check for Updates…" to the QuickEdit menu.</li>
+    <li>Turn on both helpers in Info.plist, and add the one sandbox lookup line. Update the sandbox test to expect it.</li>
+    <li>Sign the two helpers in <code>build.sh</code> before the app is notarized.</li>
+    <li>Make the EdDSA key with Sparkle's <code>generate_keys</code> (I ask you first) and save it in <code>~/keys</code>.</li>
+    <li>Add <code>generate_appcast</code> to the release recipe and host <code>appcast.xml</code> next to the DMG.</li>
+    <li>Ship 1.3 with the updater. People on 1.2.1 install that one by hand; every later version updates itself.</li>
+  </ol>
+</section>
+
+<section class="sources">
+  <h3>Sources</h3>
+  <ul>
+    <li><a href="https://github.com/sparkle-project/Sparkle" target="_blank" rel="noopener">sparkle-project/Sparkle</a> and its <a href="https://sparkle-project.org/documentation/sandboxing/" target="_blank" rel="noopener">sandboxing guide</a></li>
+    <li><a href="https://steipete.me/posts/2025/code-signing-and-notarization-sparkle-and-tears" target="_blank" rel="noopener">Peter Steinberger on signing Sparkle's XPC helpers (2025)</a></li>
+    <li><a href="https://github.com/mxcl/AppUpdater" target="_blank" rel="noopener">mxcl/AppUpdater</a> · <a href="https://github.com/s1ntoneli/AppUpdater" target="_blank" rel="noopener">s1ntoneli/AppUpdater</a> · <a href="https://github.com/Squirrel/Squirrel.Mac" target="_blank" rel="noopener">Squirrel/Squirrel.Mac</a></li>
+    <li><a href="https://flaviocopes.com/mac-app-updates/" target="_blank" rel="noopener">Flavio Copes, "How my Mac apps update themselves from GitHub Releases"</a></li>
+    <li>QuickEdit's own <code>QuickEdit/Resources/QuickEdit.entitlements</code> and the v1.2.1 release assets</li>
+  </ul>
+</section>
+
+</div>
+
+<script>
+(function () {
+  var buttons = document.querySelectorAll('.filter button');
+  function apply(mode) {
+    buttons.forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.f === mode)); });
+    document.querySelectorAll('tbody tr, #cards .card').forEach(function (el) {
+      el.hidden = mode === 'sandbox' && el.dataset.sandbox !== 'yes';
+    });
+  }
+  buttons.forEach(function (b) { b.addEventListener('click', function () { apply(b.dataset.f); }); });
+})();
+</script>
