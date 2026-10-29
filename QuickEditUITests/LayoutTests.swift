@@ -48,7 +48,7 @@ final class LayoutTests: QuickEditUITestCase {
     }
 
     /// Shift+Cmd+W makes pages; typing past a page adds a page; the menu
-    /// title flips; Cmd+> and Cmd+< zoom; Shift+Cmd+W goes back.
+    /// title flips; Cmd+= and Cmd+- zoom; Shift+Cmd+W goes back.
     func testWrapToPageAddsPagesAndZooms() throws {
         // macOS capitalizes the first word of each typed line unless this
         // system setting is off; the text below must arrive as typed.
@@ -67,11 +67,11 @@ final class LayoutTests: QuickEditUITestCase {
         waitUntil(10, "typing past page 1 did not add a page") { self.app.textViews.count >= 2 }
         attachScreenshot("wrap-to-page", XCUIScreen.main.screenshot())
 
-        safePress(".", [.command, .shift])
-        safePress(",", [.command, .shift])
-        safePress(",", [.command, .shift])
+        safePress("=", .command)
+        safePress("-", .command)
+        safePress("-", .command)
         attachScreenshot("wrap-to-page-50", XCUIScreen.main.screenshot())
-        safePress("0", .command)
+        safePress(".", .command)
 
         safePress("w", [.command, .shift])
         waitUntil(5, "Wrap to Window did not go back to one text view") { self.app.textViews.count == 1 }

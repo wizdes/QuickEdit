@@ -70,15 +70,16 @@ final class ZoomTests: XCTestCase {
         XCTAssertEqual(fullScreen.keyEquivalentModifierMask, [.command, .control])
         let actual = try item("Actual Size"), zoomIn = try item("Zoom In"), zoomOut = try item("Zoom Out")
         XCTAssertEqual(actual.action, #selector(ScalingScrollView.zoomToActualSize(_:)))
-        XCTAssertEqual(actual.keyEquivalent, "0")
+        // 1.2.2 (user request): Cmd+. resets, Cmd+= zooms in, Cmd+- zooms out.
+        // Cmd+0 is Last Tab now.
+        XCTAssertEqual(actual.keyEquivalent, ".")
         XCTAssertEqual(actual.keyEquivalentModifierMask, [.command])
-        // TextEdit's nib: "." and "," with Shift+Cmd, shown as Cmd+> and Cmd+<.
         XCTAssertEqual(zoomIn.action, #selector(ScalingScrollView.zoomIn(_:)))
-        XCTAssertEqual(zoomIn.keyEquivalent, ".")
-        XCTAssertEqual(zoomIn.keyEquivalentModifierMask, [.command, .shift])
+        XCTAssertEqual(zoomIn.keyEquivalent, "=")
+        XCTAssertEqual(zoomIn.keyEquivalentModifierMask, [.command])
         XCTAssertEqual(zoomOut.action, #selector(ScalingScrollView.zoomOut(_:)))
-        XCTAssertEqual(zoomOut.keyEquivalent, ",")
-        XCTAssertEqual(zoomOut.keyEquivalentModifierMask, [.command, .shift])
+        XCTAssertEqual(zoomOut.keyEquivalent, "-")
+        XCTAssertEqual(zoomOut.keyEquivalentModifierMask, [.command])
         XCTAssertEqual(MainMenu.build().items.map(\.title),
                        ["QuickEdit", "File", "Edit", "Format", "View", "Window", "Help"])
     }

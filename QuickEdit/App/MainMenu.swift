@@ -207,12 +207,13 @@ enum MainMenu {
     }
 
     /// Zoom, handled by the window's ScalingScrollView through the responder
-    /// chain. Keys as in Edit.nib: Shift+Cmd+. and Shift+Cmd+, (shown as Cmd+> and Cmd+<).
+    /// chain. Keys (1.2.2, user request): Cmd+= in, Cmd+- out, Cmd+. back
+    /// to 100%. Zoom In is "=", not "+": a "+" item fires only with Shift.
     private static func viewMenu() -> NSMenu {
         let menu = NSMenu(title: "View")
-        menu.addItem(item(id: "view.actualSize", "Actual Size", #selector(ScalingScrollView.zoomToActualSize(_:)), "0"))
-        menu.addItem(item(id: "view.zoomIn", "Zoom In", #selector(ScalingScrollView.zoomIn(_:)), ".", [.command, .shift]))
-        menu.addItem(item(id: "view.zoomOut", "Zoom Out", #selector(ScalingScrollView.zoomOut(_:)), ",", [.command, .shift]))
+        menu.addItem(item(id: "view.actualSize", "Actual Size", #selector(ScalingScrollView.zoomToActualSize(_:)), "."))
+        menu.addItem(item(id: "view.zoomIn", "Zoom In", #selector(ScalingScrollView.zoomIn(_:)), "="))
+        menu.addItem(item(id: "view.zoomOut", "Zoom Out", #selector(ScalingScrollView.zoomOut(_:)), "-"))
         // The gutter and the map (1.2.0): app-wide settings, shown as a
         // check mark (ViewOptionsCommand).
         menu.addItem(.separator())
@@ -242,13 +243,14 @@ enum MainMenu {
                           [.control, .shift]))
         menu.addItem(item(id: "window.nextTab", "Show Next Tab", #selector(NSWindow.selectNextTab(_:)), "\t", [.control]))
         menu.addItem(.separator())
-        // Tab 1 … Tab 8 and Last Tab (1.2.0): Ctrl+1 … Ctrl+9, as in Safari.
-        // The tag is the tab number (9: the last tab); TabNumberCommand
-        // selects it and turns the item off when there is no such tab.
-        for number in 1...9 {
+        // Tab 1 … Tab 9 on Cmd+1 … Cmd+9 and Last Tab on Cmd+0 (1.2.2, user
+        // request; 1.2.0 used Ctrl). The tag is the tab number (lastTabTag:
+        // the last tab); TabNumberCommand selects it and turns the item off
+        // when there is no such tab.
+        for number in [Int](1...9) + [TabNumberCommand.lastTabTag] {
             let last = number == TabNumberCommand.lastTabTag
             let tabItem = item(id: last ? "window.lastTab" : "window.tab\(number)", last ? "Last Tab" : "Tab \(number)",
-                               #selector(TabNumberCommand.selectTabByNumber(_:)), "\(number)", [.control], tag: number)
+                               #selector(TabNumberCommand.selectTabByNumber(_:)), last ? "0" : "\(number)", tag: number)
             tabItem.target = TabNumberCommand.shared
             menu.addItem(tabItem)
         }

@@ -2,17 +2,17 @@ import AppKit
 import XCTest
 @testable import QuickEdit
 
-/// 1.2.0 change 6: Window > Tab 1 … Tab 8 (Ctrl+1 … Ctrl+8) and Last Tab
-/// (Ctrl+9) pick a tab of the front document window, as in Safari. They
+/// Window > Tab 1 … Tab 9 (Cmd+1 … Cmd+9) and Last Tab (Cmd+0) pick a tab
+/// of the front document window (1.2.0 used Ctrl; 1.2.2 user request). They
 /// have stable ids (so Settings > Keyboard can change them), select
 /// through the tab group, and are off when that tab does not exist or the
-/// window has one tab. The text view must not take Ctrl+digit first.
+/// window has one tab. The text view must not take Cmd+digit first.
 @MainActor
 final class TabNumberTests: XCTestCase {
     private var saved: SavedSettings!
     private var before: [NSDocument] = []
 
-    static let ids = (1...8).map { "window.tab\($0)" } + ["window.lastTab"]
+    static let ids = (1...9).map { "window.tab\($0)" } + ["window.lastTab"]
 
     override func setUp() async throws {
         saved = SavedSettings()
@@ -65,23 +65,25 @@ final class TabNumberTests: XCTestCase {
 
     // MARK: The items
 
-    func testWindowMenuHasTabNumberItemsWithControlDigits() throws {
+    func testWindowMenuHasTabNumberItemsWithCommandDigits() throws {
         let bar = MainMenu.build()
         let window = try XCTUnwrap(bar.item(withTitle: "Window")?.submenu)
         for (index, id) in Self.ids.enumerated() {
             let menuItem = try item(id, in: bar)
-            XCTAssertEqual(menuItem.title, index == 8 ? "Last Tab" : "Tab \(index + 1)", id)
-            XCTAssertEqual(KeyShortcut(of: menuItem), KeyShortcut("\(index + 1)", [.control]), id)
+            let last = id == "window.lastTab"
+            let key = KeyShortcut(last ? "0" : "\(index + 1)", [.command])
+            XCTAssertEqual(menuItem.title, last ? "Last Tab" : "Tab \(index + 1)", id)
+            XCTAssertEqual(KeyShortcut(of: menuItem), key, id)
             XCTAssertTrue(menuItem.menu === window, "\(id) is in the Window menu")
             XCTAssertNotNil(menuItem.target, "\(id) has its own target, which finds the document window")
-            XCTAssertNil(Shortcuts.refusal(for: KeyShortcut("\(index + 1)", [.control]),
+            XCTAssertNil(Shortcuts.refusal(for: key,
                                            command: try XCTUnwrap(menuItem.representedObject as? MenuCommand), in: bar),
                          "its own key is allowed")
         }
         // In order, after Show Next Tab.
         let titles = window.items.map { $0.isSeparatorItem ? "-" : $0.title }
         let start = try XCTUnwrap(titles.firstIndex(of: "Tab 1"))
-        XCTAssertEqual(Array(titles[start..<(start + 9)]), (1...8).map { "Tab \($0)" } + ["Last Tab"])
+        XCTAssertEqual(Array(titles[start..<(start + 10)]), (1...9).map { "Tab \($0)" } + ["Last Tab"])
         XCTAssertLessThan(try XCTUnwrap(titles.firstIndex(of: "Show Next Tab")), start)
     }
 
@@ -101,7 +103,7 @@ final class TabNumberTests: XCTestCase {
         for id in ["window.tab1", "window.tab2", "window.tab3", "window.lastTab"] {
             XCTAssertTrue(isEnabled(try item(id, in: live)), "\(id) is on with 3 tabs")
         }
-        for number in 4...8 {
+        for number in 4...9 {
             XCTAssertFalse(isEnabled(try item("window.tab\(number)", in: live)), "Tab \(number) is off with 3 tabs")
         }
         // Choosing an item that is off does nothing.
@@ -121,21 +123,28 @@ final class TabNumberTests: XCTestCase {
 
     // MARK: The key
 
-    /// Ctrl+1 goes to the menu: the text view's key equivalent pass does
-    /// not take it, and the menu bar selects tab 1.
-    func testControlDigitReachesTheMenuNotTheTextView() throws {
+    /// Cmd+1 goes to the menu: the text view's key equivalent pass does
+    /// not take it, and the menu bar selects tab 1. Cmd+0 selects the last.
+    func testCommandDigitReachesTheMenuNotTheTextView() throws {
         let (_, group) = try tabs(2)
         let selected = try XCTUnwrap(group.selectedWindow)
         let controller = try XCTUnwrap(selected.windowController as? DocumentWindowController)
-        let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.control],
+        let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.command],
                                                    timestamp: ProcessInfo.processInfo.systemUptime,
                                                    windowNumber: selected.windowNumber, context: nil,
                                                    characters: "1", charactersIgnoringModifiers: "1",
                                                    isARepeat: false, keyCode: 18))
         let length = controller.textView.textStorage?.length
-        XCTAssertFalse(controller.textView.performKeyEquivalent(with: event), "the text view took Ctrl+1")
+        XCTAssertFalse(controller.textView.performKeyEquivalent(with: event), "the text view took Cmd+1")
         XCTAssertEqual(controller.textView.textStorage?.length, length)
-        XCTAssertTrue(try XCTUnwrap(NSApp.mainMenu).performKeyEquivalent(with: event), "no menu item took Ctrl+1")
+        XCTAssertTrue(try XCTUnwrap(NSApp.mainMenu).performKeyEquivalent(with: event), "no menu item took Cmd+1")
         XCTAssertTrue(group.selectedWindow === group.windows[0])
+        let zero = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.command],
+                                                  timestamp: ProcessInfo.processInfo.systemUptime,
+                                                  windowNumber: group.windows[0].windowNumber, context: nil,
+                                                  characters: "0", charactersIgnoringModifiers: "0",
+                                                  isARepeat: false, keyCode: 29))
+        XCTAssertTrue(try XCTUnwrap(NSApp.mainMenu).performKeyEquivalent(with: zero), "no menu item took Cmd+0")
+        XCTAssertTrue(group.selectedWindow === group.windows[1], "Cmd+0 selects the last tab")
     }
 }
