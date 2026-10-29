@@ -116,10 +116,10 @@ final class TabTests: XCTestCase {
 
         let window = try menu("Window", in: bar)
         // AppKit lists the open windows after Bring All to Front.
-        // 1.2.0 added Tab 1 … Tab 8 and Last Tab (TabNumberTests).
-        XCTAssertEqual(window.items.prefix(17).map { $0.isSeparatorItem ? "-" : $0.title },
+        // 1.2.0 added Tab 1 … Tab 8 and Last Tab, 1.2.2 Tab 9 (TabNumberTests).
+        XCTAssertEqual(window.items.prefix(18).map { $0.isSeparatorItem ? "-" : $0.title },
                        ["Minimize", "Zoom", "-", "Show Previous Tab", "Show Next Tab", "-"]
-                        + (1...8).map { "Tab \($0)" } + ["Last Tab", "-", "Bring All to Front"])
+                        + (1...9).map { "Tab \($0)" } + ["Last Tab", "-", "Bring All to Front"])
         // Close stays the one Cmd+W command.
         let close = try command("file.close", in: bar)
         XCTAssertEqual(close.action, #selector(NSWindow.performClose(_:)))

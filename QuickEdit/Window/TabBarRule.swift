@@ -145,8 +145,8 @@ final class NewTabCommand: NSObject, NSMenuItemValidation {
     }
 }
 
-/// Window > Tab 1 … Tab 8 and Last Tab (1.2.0, Ctrl+1 … Ctrl+9, as in
-/// Safari). The item's tag is the tab number; 9 means the last tab. The
+/// Window > Tab 1 … Tab 9 and Last Tab (Cmd+1 … Cmd+9 and Cmd+0 since
+/// 1.2.2). The item's tag is the tab number; lastTabTag means the last tab. The
 /// items have this target, which picks the document window the way New
 /// Tab does (the key window, or with Settings in front the front document
 /// window), and select through the tab group.
@@ -154,7 +154,7 @@ final class NewTabCommand: NSObject, NSMenuItemValidation {
 final class TabNumberCommand: NSObject, NSMenuItemValidation {
     static let shared = TabNumberCommand()
     /// The tag of Last Tab.
-    static let lastTabTag = 9
+    static let lastTabTag = 10
 
     /// The tab `tag` picks in `group`'s order; nil when that tab does not
     /// exist or the group has one tab (nothing to switch to).
