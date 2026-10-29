@@ -1,11 +1,17 @@
 # QuickEdit state
 
-Rewritten at each milestone, never appended. Last rewrite: 2026-10-27, version 1.2.1.
+Rewritten at each milestone, never appended. Last rewrite: 2026-10-28, version 1.2.2.
 
-Milestone: 1.2.1 (three user tweaks: the document map's box shows only when the mouse is within 8 px of the map, with a fade, and the separator is gone; line numbers off by default with a Settings > New Document checkbox; Writing Tools and inline predictive text off by default with a Settings checkbox, key ShowWritingTools) done. Next: the POST_MVP.md list, only when the user asks.
+Milestone: 1.2.2 (user request: Tab 1 to Tab 9 on Cmd+1 to Cmd+9 and Last Tab on Cmd+0, was Ctrl; Zoom In Cmd+=, Zoom Out Cmd+-, Actual Size Cmd+., was Shift+Cmd+. / Shift+Cmd+, / Cmd+0) done. Next: the POST_MVP.md list, only when the user asks. Auto-update options researched (docs/research/autoupdate-options.html, pick Sparkle 2); the user chose to release without it for now.
 Branch / worktree / commit: dev is merged into main at each release. Work continues on dev (worktrees/dev).
 Unmerged work: none.
-Releases: 1.0 (2026-10-25); 1.0.1 (2026-10-26: About credit and README, repo made public, page at https://yili.dev/projects/quickedit/); 1.1.0 (2026-10-26: tabs); 1.2.0 (2026-10-26, tag on 05f87ca, DMG SHA-256 d69d92a2...6b51); 1.2.1 (2026-10-27, tag on 32d1936, DMG SHA-256 7d1ed999...7322).
+Releases: 1.0 (2026-10-25); 1.0.1 (2026-10-26: About credit and README, repo made public, page at https://yili.dev/projects/quickedit/); 1.1.0 (2026-10-26: tabs); 1.2.0 (2026-10-26, tag on 05f87ca, DMG SHA-256 d69d92a2...6b51); 1.2.1 (2026-10-27, tag on 32d1936, DMG SHA-256 7d1ed999...7322); 1.2.2 (2026-10-28, DMG SHA-256 0fa0c813...7604).
+
+1.2.2 checks:
+- Fast lane, root edit, no builder or review (default key values only). Tests first: 7 of 38 failed on the old keys, then passed.
+- Unit 517 of 517. Full run at the release 586 of 590: 2 UI tests still pressed Ctrl+digit, the About version test said 1.2.1, and one test hit Safari in front. After the test fixes those passed alone (6 of 6, About class plus 3 UI tests). Packaged with dist --skip-tests; no app code changed since the full run.
+- A menu item with key "+" fires only on Shift+Cmd+=, so Zoom In is "=".
+- Choices to check: Cmd+. now resets zoom, so it no longer reaches the text view as Cancel while a document window is in front.
 
 1.2.1 checks:
 - Builder: a native Opus builder, one fix round. Review: Astra (qe-121-review-astra). Accepted all 4: the fade display link kept a closed window's map alive (now stopped on leaving the window and in windowWillClose); a drag that ended outside the hover area left the box on (tracking area now has .enabledDuringMouseDrag and mouse-up resamples the pointer); test gaps for the large-file Writing Tools guard with the setting on, and for the hover screenshots.

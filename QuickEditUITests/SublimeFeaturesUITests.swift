@@ -207,17 +207,17 @@ final class SublimeFeaturesUITests: QuickEditUITestCase {
         XCTAssertEqual(app.state, .runningForeground, "the app quit although Quit was cancelled")
         XCTAssertEqual(tabCount, 2, "a tab closed although Quit was cancelled")
         // Both keep their text: the real one and the blank one.
-        safePress("1", .control)
+        safePress("1", .command)
         waitForText("keep this text", "the first tab lost its text")
-        safePress("2", .control)
+        safePress("2", .command)
         waitForText("   ", "the blank tab lost its spaces")
         app.terminate()
     }
 
     // MARK: Change 6
 
-    /// Ctrl+1 and Ctrl+2 pick the first and second tab, Ctrl+9 the last.
-    func testControlDigitsPickTabs() throws {
+    /// Cmd+1 and Cmd+2 pick the first and second tab, Cmd+0 the last (1.2.2; Ctrl in 1.2.0).
+    func testCommandDigitsPickTabs() throws {
         launchWithTestSettings()
         safeType("one")
         safePress("t", .command)
@@ -226,16 +226,16 @@ final class SublimeFeaturesUITests: QuickEditUITestCase {
         safePress("t", .command)
         waitUntil(10, "Cmd+T made no third tab") { self.tabCount == 3 }
         safeType("three")
-        safePress("1", .control)
-        waitForText("one", "Ctrl+1 did not pick the first tab")
-        safePress("2", .control)
-        waitForText("two", "Ctrl+2 did not pick the second tab")
-        safePress("9", .control)
-        waitForText("three", "Ctrl+9 did not pick the last tab")
-        safePress("1", .control)
-        waitForText("one", "Ctrl+1 again")
+        safePress("1", .command)
+        waitForText("one", "Cmd+1 did not pick the first tab")
+        safePress("2", .command)
+        waitForText("two", "Cmd+2 did not pick the second tab")
+        safePress("0", .command)
+        waitForText("three", "Cmd+0 did not pick the last tab")
+        safePress("1", .command)
+        waitForText("one", "Cmd+1 again")
         // No tab 5: nothing changes and nothing is typed.
-        safePress("5", .control)
+        safePress("5", .command)
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         XCTAssertEqual(text, "one")
         app.menuBars.menuBarItems["Window"].click()
